@@ -1,0 +1,13 @@
+# sklein-convarchive local configuration
+# Copy to .sklein-convarchive.toml and adjust values.
+
+mattermost_server_url = "https://mattermost.example.com"
+# mattermost_token = ""
+# mattermost_username = ""
+# mattermost_password = ""
+# mattermost_mfa_token = ""
+
+s3_endpoint = "http://localhost:9000"
+s3_access_key = "rustfsadmin"
+s3_secret_key = "rustfsadmin"
+s3_bucket = "conversations"
