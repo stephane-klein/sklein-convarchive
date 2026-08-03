@@ -1,0 +1,29 @@
+[tools]
+go = "1.26.1"
+
+[env]
+_.file = ".secret"
+
+PROJECT_NAME = "sklein-convarchive"
+INSTANCE_ID = "{{ cwd | hash(algorithm='sha256', len=12) }}"
+COMPOSE_PROJECT_NAME = "{{ env.PROJECT_NAME }}_{{ env.INSTANCE_ID }}"
+
+[tasks.build]
+run = "go build -o sklein-convarchive ./cmd"
+description = "Build the sklein-convarchive CLI application"
+
+[tasks.up]
+run = "scripts/up.sh"
+description = "Start the local RustFS object storage (dev)"
+
+[tasks.down]
+run = "scripts/down.sh"
+description = "Stop and remove the local RustFS object storage (dev)"
+
+[tasks.teardown]
+run = "scripts/teardown.sh"
+description = "Stop everything and destroy the local RustFS data volumes (destructive)"
+
+[tasks.logs]
+run = "podman compose logs -f rustfs"
+description = "Follow the RustFS container logs"
