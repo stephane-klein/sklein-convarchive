@@ -19,7 +19,7 @@ RCLONE_CONFIG_RUSTFS_SECRET_ACCESS_KEY = "{{ env.S3_SECRET_KEY }}"
 RCLONE_LOG_LEVEL = "ERROR"
 
 [tasks.build]
-run = "go build -o sklein-convarchive ./cmd"
+run = "go build -ldflags \"-X main.version=$(git describe --tags --always --dirty | sed 's/^v//')\" -o sklein-convarchive ./cmd"
 description = "Build the sklein-convarchive CLI application"
 
 [tasks.up]
