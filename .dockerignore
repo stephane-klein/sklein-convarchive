@@ -1,0 +1,6 @@
+.git
+.jj
+dist
+.secret
+age.key
+.sklein-convarchive.toml

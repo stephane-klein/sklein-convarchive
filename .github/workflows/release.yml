@@ -1,0 +1,119 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goos: [linux, darwin]
+        goarch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build and archive
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME#v}
+          mkdir -p dist
+          CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+            -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GITHUB_SHA}" \
+            -o dist/sklein-convarchive ./cmd
+          cd dist
+          tar czf "sklein-convarchive_${VERSION}_${GOOS}_${GOARCH}.tar.gz" sklein-convarchive
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sklein-convarchive_${{ matrix.goos }}_${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Compute version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute checksums
+        run: |
+          set -euo pipefail
+          cd artifacts
+          for f in $(find . -name '*.tar.gz' | sort); do
+            echo "$(sha256sum "$f" | cut -d' ' -f1)  $(basename "$f")"
+          done > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VERSION=${{ steps.version.outputs.version }}
+          PRERELEASE_FLAG=""
+          [[ "$VERSION" =~ -[a-zA-Z] ]] && PRERELEASE_FLAG="--prerelease"
+          FILES=$(find artifacts -type f \( -name '*.tar.gz' -o -name SHA256SUMS \) | sort)
+          gh release create "$GITHUB_REF_NAME" $FILES --generate-notes $PRERELEASE_FLAG
+
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute version
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build image
+        id: build-image
+        uses: redhat-actions/buildah-build@v3
+        with:
+          image: sklein-convarchive
+          tags: ${{ steps.version.outputs.version }} latest
+          archs: amd64, arm64
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          containerfiles: ./Dockerfile
+
+      - name: Log in to GitHub Container Registry
+        uses: redhat-actions/podman-login@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to GitHub Container Registry
+        uses: redhat-actions/push-to-registry@v2
+        with:
+          image: ${{ steps.build-image.outputs.image }}
+          tags: ${{ steps.build-image.outputs.tags }}
+          registry: ghcr.io/stephane-klein
