@@ -14,6 +14,7 @@ A centralized archiving system for multi-source conversations (Mattermost, Signa
 - Keep your local time: timestamps are shown in your timezone (default Europe/Paris), with automatic handling of daylight saving time
 - Test that everything works before archiving: check your Mattermost access and your object storage connection in one command
 - Safe by design: nothing is uploaded until you say so (dry-run mode), and an interrupted run saves what it already fetched
+- Encrypt every object before upload with [age](https://age-encryption.org/) — the object storage never sees plaintext
 
 ## AI-Assisted Development
 
@@ -72,6 +73,36 @@ For Mattermost, you can authenticate with either:
 - a personal access token (`MM_TOKEN`), or
 - username/password (`MM_USERNAME` / `MM_PASSWORD`), with optional MFA (`MM_MFA_TOKEN`)
 
+### Encrypt objects before upload (optional)
+
+Objects are encrypted client-side with [age](https://age-encryption.org/) before being sent to the object storage, so the storage provider never sees the plaintext. Each object is an independent age file with its own random file key and can be decrypted with any age tool.
+
+1. Generate a key pair with the age CLI (available from your package manager or via `go install filippo.io/cmd/age/cmd/...@latest`), saving the secret key to a file — it is required to decrypt the archive later:
+
+   ```bash
+   $ age-keygen -o age.key
+   # public key:  age1...
+   # secret key:  written to age.key
+   ```
+
+   Keep `age.key` safe and back it up offline.
+
+2. Store the **public** key in `.secret` and enable encryption:
+
+   ```bash
+   AGE_RECIPIENT=age1...
+   ```
+
+3. Archive with `--encrypt`:
+
+   ```bash
+   $ ./sklein-convarchive mattermost archive --encrypt
+   ```
+
+   Encryption can also be enabled in config (`encrypt = true`, `age_recipient = "age1..."` in `.sklein-convarchive.toml`).
+
+Encrypted objects keep the same path layout with a `.age` suffix, e.g. `jsonl/mattermost/2026/08/03/2026-08-03.jsonl.age`.
+
 ### Archive Mattermost conversations
 
 ```bash
@@ -93,6 +124,44 @@ $ ./sklein-convarchive mattermost archive --conversation <id>                   
 - `--team <name>`: restrict to a team, or the team of the `--conversation` name
 - `--period` accepts `YYYY-MM-DD` (day), `YYYY-MM` (month), or `YYYY` (year)
 - `--timezone`: IANA timezone used for timestamps in the render and for day/month boundaries (default `Europe/Paris`; the JSONL stores the local offset, the `raw` field keeps the absolute epoch)
+
+### Browse, decrypt, and delete an archive with rclone
+
+`sklein-convarchive` writes plain S3 objects, so any S3 client can read them back. [rclone](https://rclone.org/) (MIT-licensed, actively maintained) works with RustFS and any S3-compatible endpoint, and pipes naturally into `age` for decryption. (The MinIO client `mc` is archived since late 2025, so rclone is the recommended tool here.)
+
+1. Install rclone through mise (it is declared in `.mise.toml`):
+
+   ```bash
+   $ mise install
+   ```
+
+The `rustfs` remote is already connected to the object storage through environment variables loaded by mise.
+
+1. List the archived markdown conversations:
+
+   ```bash
+   $ rclone lsd rustfs:                                   # all buckets
+   $ rclone lsf -R rustfs:conversations/markdown/         # all markdown objects
+   # markdown/mattermost/dev/town-square/2026/2026-08.md.age
+   ```
+
+   Team and conversation names are slugified in the object path.
+
+2. Retrieve and decrypt one conversation month:
+
+   ```bash
+   $ rclone copy rustfs:conversations/markdown/mattermost/dev/town-square/2026/2026-08.md.age .
+   $ age -d -i age.key 2026-08.md.age > 2026-08.md
+   ```
+
+   Or in a single pipe, without writing the encrypted file to disk:
+
+   ```bash
+   $ rclone cat rustfs:conversations/markdown/mattermost/dev/town-square/2026/2026-08.md.age \
+     | age -d -i age.key > 2026-08.md
+   ```
+
+   `age.key` is the identity file created in the [encryption section](#encrypt-objects-before-upload-optional). The JSONL layer is read and decrypted the same way, e.g. `rclone cat rustfs:conversations/jsonl/mattermost/2026/08/03/2026-08-03.jsonl.age | age -d -i age.key`.
 
 ### Configuration
 
@@ -120,6 +189,8 @@ conversations/
 
 The `jsonl/` layer is the raw, normalized archive (source of truth).
 The `markdown/` layer is a human-readable rendering, generated in parallel, one file per conversation per month, in an IRC-like format (aligned username column, text wrapping at 100 chars, messages grouped by day, threads indented under their root).
+
+With `--encrypt`, every object is age-encrypted and uploaded with a `.age` suffix and `application/octet-stream` content type; the path layout is unchanged.
 
 ## Common Schema
 

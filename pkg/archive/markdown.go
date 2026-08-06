@@ -146,9 +146,9 @@ func (b *MarkdownBuffer) Render(key string) ([]byte, error) {
 // Flush renders and uploads each buffered conversation+month as a single
 // Markdown object in the layout
 // markdown/mattermost/<team>/<display>/<year>/<month>.md.
-func (b *MarkdownBuffer) Flush(ctx context.Context, uploader *Uploader) error {
+func (b *MarkdownBuffer) Flush(ctx context.Context, uploader ObjectPutter) error {
 	for _, key := range b.Keys() {
-		teamName, displayName, month, err := parseMonthKey(key)
+		teamName, displayName, month, err := ParseMonthKey(key)
 		if err != nil {
 			return err
 		}
@@ -408,7 +408,7 @@ func monthKey(teamName, displayName, month string) string {
 	return teamName + "|" + displayName + "|" + month
 }
 
-func parseMonthKey(key string) (teamName, displayName, month string, err error) {
+func ParseMonthKey(key string) (teamName, displayName, month string, err error) {
 	parts := strings.Split(key, "|")
 	if len(parts) != 3 {
 		return "", "", "", fmt.Errorf("invalid month key %q", key)
