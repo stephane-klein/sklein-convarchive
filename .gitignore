@@ -1,4 +1,5 @@
 sklein-convarchive
+dist/
 .secret
 .sklein-convarchive.toml
 age.key

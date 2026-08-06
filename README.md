@@ -16,6 +16,72 @@ A centralized archiving system for multi-source conversations (Mattermost, Signa
 - Safe by design: nothing is uploaded until you say so (dry-run mode), and an interrupted run saves what it already fetched
 - Encrypt every object before upload with [age](https://age-encryption.org/) — the object storage never sees plaintext
 
+## Installation
+
+Binaries are published for every release as GitHub Release assets:
+
+- Linux amd64 / arm64 and macOS (darwin) amd64 / arm64 — download the `.tar.gz` from the [releases](https://github.com/stephane-klein/sklein-convarchive/releases) page and verify it against the attached `SHA256SUMS` file
+
+### Install with curl
+
+```bash
+$ curl -sSL -o sklein-convarchive.tar.gz \
+    https://github.com/stephane-klein/sklein-convarchive/releases/download/v0.1.0/sklein-convarchive_0.1.0_linux_amd64.tar.gz
+$ tar xzf sklein-convarchive.tar.gz
+$ ./sklein-convarchive --version   # sklein-convarchive version 0.1.0
+```
+
+Archives are named `sklein-convarchive_<version>_<os>_<arch>.tar.gz` — adjust `v0.1.0` and `linux_amd64` to the release tag and platform you need (the checksums in the release `SHA256SUMS` file let you verify the download).
+
+### Install with mise
+
+Install with [mise](https://mise.jdx.dev):
+
+```toml
+[tools]
+"github:stephane-klein/sklein-convarchive" = "0.1.0"
+
+[env]
+_.file = ".secret"
+MM_SERVER_URL = "https://chat.example.com"
+S3_ENDPOINT = "http://localhost:9000"
+S3_BUCKET = "conversations"
+SKLEIN_CONVARCHIVE_TIMEZONE = "Europe/Paris"
+```
+
+```bash
+$ mise install
+$ sklein-convarchive --version   # sklein-convarchive version 0.1.0
+```
+
+Secrets (`MM_TOKEN`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `AGE_RECIPIENT`, …) go in a local `.secret` file (loaded by mise via `_.file`), kept out of version control.
+
+A container image is also published (multi-arch `linux/amd64` and `linux/arm64`, Debian-based):
+
+```bash
+$ podman pull ghcr.io/stephane-klein/sklein-convarchive:latest
+```
+
+### Run from a container
+
+```bash
+$ podman run --rm ghcr.io/stephane-klein/sklein-convarchive:latest --version
+```
+
+Configuration is passed through environment variables (or a mounted config file):
+
+```bash
+$ podman run --rm \
+    -e MM_SERVER_URL=https://chat.example.com \
+    -e MM_TOKEN=... \
+    -e S3_ENDPOINT=http://localhost:9000 \
+    -e S3_ACCESS_KEY=... \
+    -e S3_SECRET_KEY=... \
+    ghcr.io/stephane-klein/sklein-convarchive:latest mattermost archive --dry-run
+```
+
+The image ships with the IANA timezone database and CA certificates, so `--timezone` and HTTPS work out of the box.
+
 ## AI-Assisted Development
 
 This project was developed using:
@@ -42,6 +108,7 @@ This project was developed using:
 ```bash
 $ mise install
 $ mise run build   # builds ./sklein-convarchive
+$ ./sklein-convarchive --version   # e.g. "sklein-convarchive version 0.1.0"
 ```
 
 ### Start the local object storage (dev)
@@ -210,4 +277,12 @@ Mattermost metadata example:
 
 ```json
 { "team": "dev", "channel": "général", "server_url": "https://chat.example.com" }
+```
+
+## Releases
+
+To publish a release, tag a commit and push the tag:
+
+```bash
+$ git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0
 ```
