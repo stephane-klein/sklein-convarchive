@@ -35,6 +35,8 @@ func init() {
 	rootCmd.PersistentFlags().Bool("s3-use-ssl", false, "Use SSL for the S3 endpoint")
 	rootCmd.PersistentFlags().Bool("dry-run", false, "Print actions without executing them")
 	rootCmd.PersistentFlags().String("timezone", "Europe/Paris", "Timezone used for timestamps in the render (IANA name)")
+	rootCmd.PersistentFlags().Bool("encrypt", false, "Encrypt objects with age before uploading them")
+	rootCmd.PersistentFlags().String("age-recipient", "", "Age X25519 recipient public key (age1...) used to encrypt objects")
 
 	viper.BindPFlag("s3.endpoint", rootCmd.PersistentFlags().Lookup("s3-endpoint"))
 	viper.BindPFlag("s3.access_key", rootCmd.PersistentFlags().Lookup("s3-access-key"))
@@ -43,6 +45,8 @@ func init() {
 	viper.BindPFlag("s3.use_ssl", rootCmd.PersistentFlags().Lookup("s3-use-ssl"))
 	viper.BindPFlag("dry-run", rootCmd.PersistentFlags().Lookup("dry-run"))
 	viper.BindPFlag("timezone", rootCmd.PersistentFlags().Lookup("timezone"))
+	viper.BindPFlag("encrypt", rootCmd.PersistentFlags().Lookup("encrypt"))
+	viper.BindPFlag("age.recipient", rootCmd.PersistentFlags().Lookup("age-recipient"))
 
 	viper.BindEnv("s3.endpoint", "S3_ENDPOINT")
 	viper.BindEnv("s3.access_key", "S3_ACCESS_KEY")
@@ -50,6 +54,8 @@ func init() {
 	viper.BindEnv("s3.bucket", "S3_BUCKET")
 	viper.BindEnv("s3.use_ssl", "S3_USE_SSL")
 	viper.BindEnv("timezone", "SKLEIN_CONVARCHIVE_TIMEZONE")
+	viper.BindEnv("encrypt", "SKLEIN_CONVARCHIVE_ENCRYPT")
+	viper.BindEnv("age.recipient", "AGE_RECIPIENT")
 }
 
 func initConfig() {

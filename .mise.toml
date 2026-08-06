@@ -1,5 +1,6 @@
 [tools]
 go = "1.26.1"
+rclone = "1.75.0"
 
 [env]
 _.file = ".secret"
@@ -7,6 +8,15 @@ _.file = ".secret"
 PROJECT_NAME = "sklein-convarchive"
 INSTANCE_ID = "{{ cwd | hash(algorithm='sha256', len=12) }}"
 COMPOSE_PROJECT_NAME = "{{ env.PROJECT_NAME }}_{{ env.INSTANCE_ID }}"
+
+# rclone remote "rustfs" configured from the S3 credentials in .secret
+RCLONE_CONFIG_RUSTFS_TYPE = "s3"
+RCLONE_CONFIG_RUSTFS_PROVIDER = "Other"
+RCLONE_CONFIG_RUSTFS_ENDPOINT = "{{ env.S3_ENDPOINT }}"
+RCLONE_CONFIG_RUSTFS_ACCESS_KEY_ID = "{{ env.S3_ACCESS_KEY }}"
+RCLONE_CONFIG_RUSTFS_SECRET_ACCESS_KEY = "{{ env.S3_SECRET_KEY }}"
+# silence rclone's NOTICE about the missing config file (the remote is env-configured)
+RCLONE_LOG_LEVEL = "ERROR"
 
 [tasks.build]
 run = "go build -o sklein-convarchive ./cmd"

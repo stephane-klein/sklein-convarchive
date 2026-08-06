@@ -11,3 +11,7 @@ s3_endpoint = "http://localhost:9000"
 s3_access_key = "rustfsadmin"
 s3_secret_key = "rustfsadmin"
 s3_bucket = "conversations"
+
+# Optional age encryption (public key only, generate with: age-keygen)
+# encrypt = true
+# age_recipient = "age1..."

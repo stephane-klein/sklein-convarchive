@@ -10,6 +10,13 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
+// ObjectPutter is implemented by any object storage writer that can upload a
+// single object. It is the seam where encryption is injected: Uploader writes
+// plaintext, EncryptingUploader encrypts first.
+type ObjectPutter interface {
+	Put(ctx context.Context, key string, data []byte, contentType string) error
+}
+
 // Uploader wraps the S3-compatible object storage client.
 type Uploader struct {
 	client *minio.Client

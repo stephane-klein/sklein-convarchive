@@ -125,6 +125,12 @@ func runArchive() {
 	s3 := getS3Config()
 	loc := getTimezone()
 
+	encryptor, err := getEncryptor()
+	if err != nil {
+		printError("%v", err)
+		os.Exit(1)
+	}
+
 	channelFlag := viper.GetString("archive.conversation")
 	if channelFlag == "" {
 		channelFlag = viper.GetString("archive.channel")
@@ -163,57 +169,57 @@ func runArchive() {
 	interrupted := false
 
 	// Target a specific channel (by ID, or by name+team).
-		if channelFlag != "" {
-			var channel *mattermost.Channel
-			teamName := ""
+	if channelFlag != "" {
+		var channel *mattermost.Channel
+		teamName := ""
 
-			if looksLikeChannelID(channelFlag) {
-				channel, err = mattermostClient.GetChannel(ctx, channelFlag)
-				if err != nil {
-					printError("failed to resolve channel %q: %v", channelFlag, err)
-					os.Exit(1)
-				}
-				if team, err := findTeamByID(teams, channel.TeamId); err == nil {
-					teamName = team.Name
-				}
-			} else {
-				if teamFlag == "" {
-					printError("--conversation by name requires --team (or pass the conversation ID from 'mattermost list-conversations')")
-					os.Exit(1)
-				}
-				team, err := findTeamByName(teams, teamFlag)
-				if err != nil {
-					printError("%v", err)
-					os.Exit(1)
-				}
-				channel, err = mattermostClient.GetChannelByName(ctx, team.Id, channelFlag)
-				if err != nil {
-					printError("failed to resolve channel %q in team %q: %v", channelFlag, teamFlag, err)
-					os.Exit(1)
-				}
-				teamName = team.Name
-			}
-
-			meta, err := conversationMeta(ctx, mattermostClient, userCache, me.Id, *channel)
+		if looksLikeChannelID(channelFlag) {
+			channel, err = mattermostClient.GetChannel(ctx, channelFlag)
 			if err != nil {
-				printError("failed to resolve conversation participants: %v", err)
+				printError("failed to resolve channel %q: %v", channelFlag, err)
 				os.Exit(1)
 			}
-
-			postCount, err := archiveChannel(ctx, mattermostClient, userCache, buffer, mdBuffer, startMs, endMs, loc, teamName, meta, *channel, progressFunc(channel.Name))
-			if err != nil {
-				if ctx.Err() != nil {
-					interrupted = true
-				} else {
-					printError("failed to archive channel %q: %v", channel.Name, err)
-					os.Exit(1)
-				}
-			}
-			fmt.Fprintln(os.Stderr)
-			if !interrupted {
-				fmt.Printf("  channel %q: %d posts\n", channel.Name, postCount)
+			if team, err := findTeamByID(teams, channel.TeamId); err == nil {
+				teamName = team.Name
 			}
 		} else {
+			if teamFlag == "" {
+				printError("--conversation by name requires --team (or pass the conversation ID from 'mattermost list-conversations')")
+				os.Exit(1)
+			}
+			team, err := findTeamByName(teams, teamFlag)
+			if err != nil {
+				printError("%v", err)
+				os.Exit(1)
+			}
+			channel, err = mattermostClient.GetChannelByName(ctx, team.Id, channelFlag)
+			if err != nil {
+				printError("failed to resolve channel %q in team %q: %v", channelFlag, teamFlag, err)
+				os.Exit(1)
+			}
+			teamName = team.Name
+		}
+
+		meta, err := conversationMeta(ctx, mattermostClient, userCache, me.Id, *channel)
+		if err != nil {
+			printError("failed to resolve conversation participants: %v", err)
+			os.Exit(1)
+		}
+
+		postCount, err := archiveChannel(ctx, mattermostClient, userCache, buffer, mdBuffer, startMs, endMs, loc, teamName, meta, *channel, progressFunc(channel.Name))
+		if err != nil {
+			if ctx.Err() != nil {
+				interrupted = true
+			} else {
+				printError("failed to archive channel %q: %v", channel.Name, err)
+				os.Exit(1)
+			}
+		}
+		fmt.Fprintln(os.Stderr)
+		if !interrupted {
+			fmt.Printf("  channel %q: %d posts\n", channel.Name, postCount)
+		}
+	} else {
 		if teamFlag != "" {
 			team, err := findTeamByName(teams, teamFlag)
 			if err != nil {
@@ -284,10 +290,31 @@ func runArchive() {
 	if isDryRun() {
 		fmt.Println("Dry run: no upload performed")
 		for _, day := range buffer.Days() {
-			fmt.Printf("  would upload %s (%d lines)\n", day, buffer.LineCount(day))
+			key, err := archive.DailyObjectKey(day)
+			if err != nil {
+				printError("%v", err)
+				os.Exit(1)
+			}
+			if encryptor != nil {
+				key += ".age"
+			}
+			fmt.Printf("  would upload %s (%d lines)\n", key, buffer.LineCount(day))
 		}
 		for _, key := range mdBuffer.Keys() {
-			fmt.Printf("  would upload markdown %s (%d posts)\n", key, mdBuffer.LineCount(key))
+			teamName, displayName, month, err := archive.ParseMonthKey(key)
+			if err != nil {
+				printError("%v", err)
+				os.Exit(1)
+			}
+			objKey, err := archive.MarkdownObjectKey(teamName, displayName, month)
+			if err != nil {
+				printError("%v", err)
+				os.Exit(1)
+			}
+			if encryptor != nil {
+				objKey += ".age"
+			}
+			fmt.Printf("  would upload markdown %s (%d posts)\n", objKey, mdBuffer.LineCount(key))
 		}
 		if interrupted {
 			os.Exit(130)
@@ -302,10 +329,14 @@ func runArchive() {
 		uploadCtx = context.WithoutCancel(ctx)
 	}
 
-	uploader, err := archive.NewUploader(uploadCtx, s3.Endpoint, s3.AccessKey, s3.SecretKey, s3.Bucket, s3.UseSSL)
+	var uploader archive.ObjectPutter
+	uploader, err = archive.NewUploader(uploadCtx, s3.Endpoint, s3.AccessKey, s3.SecretKey, s3.Bucket, s3.UseSSL)
 	if err != nil {
 		printError("failed to connect to object storage: %v", err)
 		os.Exit(1)
+	}
+	if encryptor != nil {
+		uploader = archive.NewEncryptingUploader(uploader, encryptor)
 	}
 
 	if err := buffer.Flush(uploadCtx, uploader); err != nil {
@@ -334,10 +365,10 @@ func connectMattermost(ctx context.Context, auth mattermostAuthConfig) (*matterm
 
 	client := mattermost.NewClient(auth.ServerURL)
 	if err := client.Authenticate(ctx, mattermost.AuthConfig{
-		Token:     auth.Token,
-		Username:  auth.Username,
-		Password:  auth.Password,
-		MFAToken:  auth.MFAToken,
+		Token:    auth.Token,
+		Username: auth.Username,
+		Password: auth.Password,
+		MFAToken: auth.MFAToken,
 	}); err != nil {
 		return nil, nil, fmt.Errorf("authentication failed: %w", err)
 	}
@@ -684,6 +715,20 @@ func isDryRun() bool {
 	return viper.GetBool("dry-run")
 }
 
+// getEncryptor returns an Encryptor when encryption is enabled, or nil
+// otherwise. The age recipient is required and validated as early as possible
+// so a misconfigured run fails before any data is fetched.
+func getEncryptor() (*archive.Encryptor, error) {
+	if !viper.GetBool("encrypt") {
+		return nil, nil
+	}
+	recipient := viper.GetString("age.recipient")
+	if recipient == "" {
+		return nil, fmt.Errorf("--encrypt requires an age recipient (flag --age-recipient, env AGE_RECIPIENT, or config age_recipient)")
+	}
+	return archive.NewEncryptor(recipient)
+}
+
 // progressFunc returns a progress callback that updates a single line on
 // stderr (via carriage return) as posts are fetched for a channel. Writing to
 // stderr keeps stdout clean for the final results.
@@ -710,9 +755,9 @@ func parsePeriod(s string, loc *time.Location) (int64, int64, error) {
 		"2006",       // year
 	}
 	ends := []func(time.Time) time.Time{
-		func(t time.Time) time.Time { return t.AddDate(0, 0, 1) },   // day: +1 day
-		func(t time.Time) time.Time { return t.AddDate(0, 1, 0) },   // month: +1 month
-		func(t time.Time) time.Time { return t.AddDate(1, 0, 0) },   // year: +1 year
+		func(t time.Time) time.Time { return t.AddDate(0, 0, 1) }, // day: +1 day
+		func(t time.Time) time.Time { return t.AddDate(0, 1, 0) }, // month: +1 month
+		func(t time.Time) time.Time { return t.AddDate(1, 0, 0) }, // year: +1 year
 	}
 
 	for i, layout := range layouts {

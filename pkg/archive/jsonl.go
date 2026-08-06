@@ -84,7 +84,7 @@ func (b *DayBuffer) Content(day string) ([]byte, error) {
 // Flush uploads each day's buffered lines as a single S3 object in
 // the layout jsonl/mattermost/<year>/<month>/<day>/<date>.jsonl.
 // Lines of a day are written in chronological order (oldest first).
-func (b *DayBuffer) Flush(ctx context.Context, uploader *Uploader) error {
+func (b *DayBuffer) Flush(ctx context.Context, uploader ObjectPutter) error {
 	for _, day := range b.Days() {
 		key, err := DailyObjectKey(day)
 		if err != nil {
