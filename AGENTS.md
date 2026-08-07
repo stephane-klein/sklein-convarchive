@@ -50,6 +50,12 @@ The `conversations` bucket is created automatically on the first `mattermost arc
 - One JSONL object per day, one Markdown object per conversation+month, both uploaded once at end of batch (S3 has no native append)
 - Markdown generation lives in `pkg/archive/markdown.go`, wired in parallel with the JSONL buffer in `cmd/mattermost.go`
 
+## Supplementary Documentation
+
+- [`docs/agents/`](docs/agents/) — operational snapshots of subsystems (loaded on demand by the agent)
+- [`docs/decisions/`](docs/decisions/) — architecture decision records
+- `.opencode/skills/new-decision/` — skill for creating new decision records
+
 ## Version Control
 
 This repository uses Jujutsu (`jj`). Use `jj` commands instead of `git`.

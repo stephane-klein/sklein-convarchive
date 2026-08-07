@@ -303,3 +303,10 @@ To publish a release, tag a commit and push the tag:
 ```bash
 $ git tag -a v0.1.0 -m "Release v0.1.0" && git push origin v0.1.0
 ```
+
+## Documentation
+
+- [`docs/decisions/`](docs/decisions/) — Architecture Decision Records
+  (ADRs) following the MADR convention. To create a new one, ask the
+  agent to use the `.opencode/skills/new-decision/` skill.
+- [`docs/agents/`](docs/agents/) — operational notes for AI agents (OpenCode, etc.), loaded on demand.
