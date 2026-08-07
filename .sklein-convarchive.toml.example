@@ -1,17 +1,20 @@
 # sklein-convarchive local configuration
 # Copy to .sklein-convarchive.toml and adjust values.
 
-mattermost_server_url = "https://mattermost.example.com"
-# mattermost_token = ""
-# mattermost_username = ""
-# mattermost_password = ""
-# mattermost_mfa_token = ""
+[mattermost]
+server_url = "https://mattermost.example.com"
+# token = ""
+# username = ""
+# password = ""
+# mfa_token = ""
 
-s3_endpoint = "http://localhost:9000"
-s3_access_key = "rustfsadmin"
-s3_secret_key = "rustfsadmin"
-s3_bucket = "conversations"
+[s3]
+endpoint = "http://localhost:9000"
+access_key = "rustfsadmin"
+secret_key = "rustfsadmin"
+bucket = "conversations"
 
 # Optional age encryption (public key only, generate with: age-keygen)
+[age]
+# recipient = "age1..."
 # encrypt = true
-# age_recipient = "age1..."

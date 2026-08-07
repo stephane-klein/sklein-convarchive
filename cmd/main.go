@@ -45,7 +45,7 @@ func init() {
 	viper.BindPFlag("s3.use_ssl", rootCmd.PersistentFlags().Lookup("s3-use-ssl"))
 	viper.BindPFlag("dry-run", rootCmd.PersistentFlags().Lookup("dry-run"))
 	viper.BindPFlag("timezone", rootCmd.PersistentFlags().Lookup("timezone"))
-	viper.BindPFlag("encrypt", rootCmd.PersistentFlags().Lookup("encrypt"))
+	viper.BindPFlag("age.encrypt", rootCmd.PersistentFlags().Lookup("encrypt"))
 	viper.BindPFlag("age.recipient", rootCmd.PersistentFlags().Lookup("age-recipient"))
 
 	viper.BindEnv("s3.endpoint", "S3_ENDPOINT")
@@ -54,7 +54,7 @@ func init() {
 	viper.BindEnv("s3.bucket", "S3_BUCKET")
 	viper.BindEnv("s3.use_ssl", "S3_USE_SSL")
 	viper.BindEnv("timezone", "SKLEIN_CONVARCHIVE_TIMEZONE")
-	viper.BindEnv("encrypt", "SKLEIN_CONVARCHIVE_ENCRYPT")
+	viper.BindEnv("age.encrypt", "SKLEIN_CONVARCHIVE_ENCRYPT")
 	viper.BindEnv("age.recipient", "AGE_RECIPIENT")
 }
 
