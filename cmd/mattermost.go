@@ -80,7 +80,7 @@ var archiveCmd = &cobra.Command{
 func init() {
 	archiveCmd.Flags().String("conversation", "", "Conversation to archive (channel ID, direct message ID, or name with --team)")
 	archiveCmd.Flags().String("team", "", "Team to archive, or the team of the --conversation name")
-	archiveCmd.Flags().String("period", "", "Period to archive: YYYY-MM-DD (day), YYYY-MM (month), or YYYY (year)")
+	archiveCmd.Flags().String("period", "", "Period to archive: YYYY-MM (month) or YYYY (year)")
 
 	// Hidden alias kept for backwards compatibility.
 	archiveCmd.Flags().String("channel", "", "Deprecated alias of --conversation")
@@ -164,7 +164,7 @@ func runArchive() {
 	fmt.Printf("Authenticated as %s (%d teams)\n", me.Username, len(teams))
 
 	userCache := newUserCache(mattermostClient)
-	buffer := archive.NewDayBuffer()
+	buffer := archive.NewMonthBuffer()
 	mdBuffer := archive.NewMarkdownBuffer()
 	interrupted := false
 
@@ -275,21 +275,26 @@ func runArchive() {
 
 	if interrupted {
 		fmt.Fprintln(os.Stderr)
-		fmt.Println("Interrupted, uploading the data fetched so far…")
+		fmt.Println("Interrupted, fetching stopped")
 	}
 
 	if isDryRun() {
 		fmt.Println("Dry run: no upload performed")
-		for _, day := range buffer.Days() {
-			key, err := archive.DailyObjectKey(day)
+		for _, key := range buffer.Keys() {
+			teamName, displayName, month, err := archive.ParseMonthKey(key)
+			if err != nil {
+				printError("%v", err)
+				os.Exit(1)
+			}
+			objKey, err := archive.JSONLObjectKey(teamName, displayName, month)
 			if err != nil {
 				printError("%v", err)
 				os.Exit(1)
 			}
 			if encryptor != nil {
-				key += ".age"
+				objKey += ".age"
 			}
-			fmt.Printf("  would upload %s (%d lines)\n", key, buffer.LineCount(day))
+			fmt.Printf("  would upload %s (%d lines)\n", objKey, buffer.LineCount(key))
 		}
 		for _, key := range mdBuffer.Keys() {
 			teamName, displayName, month, err := archive.ParseMonthKey(key)
@@ -313,15 +318,14 @@ func runArchive() {
 		return
 	}
 
-	// After an interrupt the context is already canceled, so use a fresh one
-	// for the remaining S3 uploads.
-	uploadCtx := ctx
 	if interrupted {
-		uploadCtx = context.WithoutCancel(ctx)
+		fmt.Fprintln(os.Stderr)
+		fmt.Println("Interrupted, nothing uploaded (a partial month must never replace a complete one)")
+		os.Exit(130)
 	}
 
 	var uploader archive.ObjectPutter
-	uploader, err = archive.NewUploader(uploadCtx, s3.Endpoint, s3.AccessKey, s3.SecretKey, s3.Bucket, s3.UseSSL)
+	uploader, err = archive.NewUploader(ctx, s3.Endpoint, s3.AccessKey, s3.SecretKey, s3.Bucket, s3.UseSSL)
 	if err != nil {
 		printError("failed to connect to object storage: %v", err)
 		os.Exit(1)
@@ -330,21 +334,17 @@ func runArchive() {
 		uploader = archive.NewEncryptingUploader(uploader, encryptor)
 	}
 
-	if err := buffer.Flush(uploadCtx, uploader); err != nil {
+	if err := buffer.Flush(ctx, uploader); err != nil {
 		printError("failed to upload: %v", err)
 		os.Exit(1)
 	}
 
-	if err := mdBuffer.Flush(uploadCtx, uploader); err != nil {
+	if err := mdBuffer.Flush(ctx, uploader); err != nil {
 		printError("failed to upload markdown: %v", err)
 		os.Exit(1)
 	}
 
 	fmt.Println("Upload complete")
-
-	if interrupted {
-		os.Exit(130)
-	}
 }
 
 // connectMattermost authenticates against the Mattermost server and returns
@@ -632,7 +632,7 @@ func archiveChannel(
 	ctx context.Context,
 	client *mattermost.Client,
 	userCache *userCache,
-	buffer *archive.DayBuffer,
+	buffer *archive.MonthBuffer,
 	mdBuffer *archive.MarkdownBuffer,
 	startMs, endMs int64,
 	loc *time.Location,
@@ -680,7 +680,7 @@ func archiveChannel(
 			}, loc)
 			entry.Author = username
 
-			if err := buffer.Add(entry); err != nil {
+			if err := buffer.Add(entry, meta); err != nil {
 				return postCount, err
 			}
 			if mdBuffer != nil {
@@ -734,19 +734,16 @@ func progressFunc(channelName string) func(fetched int, day string) {
 }
 
 // parsePeriod converts a period expression into a [start, end] range of
-// Unix milliseconds, in the given location (a day/month/year boundary is
+// Unix milliseconds, in the given location (a month/year boundary is
 // midnight local time). Supported formats:
-//   - YYYY-MM-DD: a single day
 //   - YYYY-MM: a whole month
 //   - YYYY: a whole year
 func parsePeriod(s string, loc *time.Location) (int64, int64, error) {
 	layouts := []string{
-		"2006-01-02", // day
-		"2006-01",    // month
-		"2006",       // year
+		"2006-01", // month
+		"2006",    // year
 	}
 	ends := []func(time.Time) time.Time{
-		func(t time.Time) time.Time { return t.AddDate(0, 0, 1) }, // day: +1 day
 		func(t time.Time) time.Time { return t.AddDate(0, 1, 0) }, // month: +1 month
 		func(t time.Time) time.Time { return t.AddDate(1, 0, 0) }, // year: +1 year
 	}
@@ -760,7 +757,7 @@ func parsePeriod(s string, loc *time.Location) (int64, int64, error) {
 		}
 	}
 
-	return 0, 0, fmt.Errorf("invalid period %q: expected YYYY-MM-DD, YYYY-MM, or YYYY", s)
+	return 0, 0, fmt.Errorf("invalid period %q: expected YYYY-MM or YYYY", s)
 }
 
 // looksLikeChannelID reports whether the argument is a Mattermost channel ID

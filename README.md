@@ -9,11 +9,11 @@ A centralized archiving system for multi-source conversations (Mattermost, Signa
 - Archive all your [Mattermost](https://github.com/mattermost/mattermost) conversations — channels, private groups, and 1-1 direct messages — into Object Storage (S3-compatible)
 - Store them in a durable, open format (JSONL) that stays readable forever and is ready for AI/analysis later
 - Works with the storage you may already use: AWS S3, Backblaze B2, Scaleway, MinIO, RustFS, etc.
-- Choose exactly what to archive: a specific conversation, one day, one month, or a whole year
+- Choose exactly what to archive: a specific conversation, one month, or a whole year
 - Get a clean, readable version of every conversation as Markdown, one file per conversation per month — perfect for browsing or sharing
 - Keep your local time: timestamps are shown in your timezone (default Europe/Paris), with automatic handling of daylight saving time
 - Test that everything works before archiving: check your Mattermost access and your object storage connection in one command
-- Safe by design: nothing is uploaded until you say so (dry-run mode), and an interrupted run saves what it already fetched
+- Safe by design: nothing is uploaded until you say so (dry-run mode), and an interrupted run never uploads partial data
 - Encrypt every object before upload with [age](https://age-encryption.org/) — the object storage never sees plaintext
 
 ## Installation
@@ -169,7 +169,7 @@ Objects are encrypted client-side with [age](https://age-encryption.org/) before
 
    Encryption can also be enabled in the local config (the `[age]` section of `.sklein-convarchive.toml`, see below).
 
-Encrypted objects keep the same path layout with a `.age` suffix, e.g. `jsonl/mattermost/2026/08/03/2026-08-03.jsonl.age`.
+Encrypted objects keep the same path layout with a `.age` suffix, e.g. `jsonl/mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.age`.
 
 ### Archive Mattermost conversations
 
@@ -182,7 +182,6 @@ $ ./sklein-convarchive mattermost archive                 # archive everything t
 Target a specific conversation and a period:
 
 ```bash
-$ ./sklein-convarchive mattermost archive --conversation <id> --period 2026-08-03   # one day of a channel/DM
 $ ./sklein-convarchive mattermost archive --team dev --conversation general --period 2026-08 # one month of a channel
 $ ./sklein-convarchive mattermost archive --period 2026                                  # a whole year
 $ ./sklein-convarchive mattermost archive --conversation <id>                           # full history of a channel/DM
@@ -190,7 +189,7 @@ $ ./sklein-convarchive mattermost archive --conversation <id>                   
 
 - `--conversation <id>`: conversation ID (from the `ID` column of `mattermost list-conversations`), or a channel name with `--team`
 - `--team <name>`: restrict to a team, or the team of the `--conversation` name
-- `--period` accepts `YYYY-MM-DD` (day), `YYYY-MM` (month), or `YYYY` (year)
+- `--period` accepts `YYYY-MM` (month) or `YYYY` (year)
 - `--timezone`: IANA timezone used for timestamps in the render and for day/month boundaries (default `Europe/Paris`; the JSONL stores the local offset, the `raw` field keeps the absolute epoch)
 
 ### Browse, decrypt, and delete an archive with rclone
@@ -229,7 +228,7 @@ The `rustfs` remote is already connected to the object storage through environme
      | age -d -i age.key > 2026-08.md
    ```
 
-   `age.key` is the identity file created in the [encryption section](#encrypt-objects-before-upload-optional). The JSONL layer is read and decrypted the same way, e.g. `rclone cat rustfs:conversations/jsonl/mattermost/2026/08/03/2026-08-03.jsonl.age | age -d -i age.key`.
+   `age.key` is the identity file created in the [encryption section](#encrypt-objects-before-upload-optional). The JSONL layer is read and decrypted the same way, e.g. `rclone cat rustfs:conversations/jsonl/mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.age | age -d -i age.key`.
 
 ### Configuration
 
@@ -266,12 +265,12 @@ Source-specific flags (Mattermost: `--server-url`, `--token`, `--username`, `--p
 ```
 conversations/
   jsonl/
-    mattermost/2026/08/03/2026-08-03.jsonl
+    mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl
   markdown/
     mattermost/team-nimbus/chan-gamma/2026/2026-08.md
 ```
 
-The `jsonl/` layer is the raw, normalized archive (source of truth).
+The `jsonl/` layer is the raw, normalized archive (source of truth), one file per conversation per month.
 The `markdown/` layer is a human-readable rendering, generated in parallel, one file per conversation per month, in an IRC-like format (aligned username column, text wrapping at 100 chars, messages grouped by day, threads indented under their root).
 
 With `--encrypt`, every object is age-encrypted and uploaded with a `.age` suffix and `application/octet-stream` content type; the path layout is unchanged.

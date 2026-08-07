@@ -9,4 +9,4 @@ decision month and `NNN` is a zero-padded sequence number.
 
 ## Records
 
-- ...
+- [2026-08_001-object-granularity-matches-filters.md](./2026-08_001-object-granularity-matches-filters.md) — Object granularity mirrors the selection filters (conversation × month)

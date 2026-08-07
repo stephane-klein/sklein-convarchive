@@ -436,9 +436,10 @@ func slugify(s string) string {
 	return strings.Trim(out, "-")
 }
 
-// MarkdownObjectKey computes the object storage key for a conversation+month:
-// markdown/mattermost/<team>/<display>/<year>/<month>.md
-func MarkdownObjectKey(teamName, displayName, month string) (string, error) {
+// conversationObjectPath computes the object storage path prefix shared by
+// the JSONL and Markdown layers for a conversation+month:
+// mattermost/<team>/<display-slug>/<year>/<month>
+func conversationObjectPath(teamName, displayName, month string) (string, error) {
 	ts, err := time.Parse("2006-01", month)
 	if err != nil {
 		return "", fmt.Errorf("invalid month %q: %w", month, err)
@@ -453,6 +454,16 @@ func MarkdownObjectKey(teamName, displayName, month string) (string, error) {
 		display = slugify(displayName)
 	}
 
-	return fmt.Sprintf("markdown/mattermost/%s/%s/%d/%s.md",
+	return fmt.Sprintf("mattermost/%s/%s/%d/%s",
 		team, display, ts.Year(), month), nil
+}
+
+// MarkdownObjectKey computes the object storage key for a conversation+month:
+// markdown/mattermost/<team>/<display-slug>/<year>/<month>.md
+func MarkdownObjectKey(teamName, displayName, month string) (string, error) {
+	path, err := conversationObjectPath(teamName, displayName, month)
+	if err != nil {
+		return "", err
+	}
+	return "markdown/" + path + ".md", nil
 }

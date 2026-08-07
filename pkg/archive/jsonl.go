@@ -18,24 +18,26 @@ func MarshalEntry(entry *Entry) ([]byte, error) {
 	return b, nil
 }
 
-// DayBuffer accumulates JSONL lines grouped by day. Lines of a day are sorted
-// chronologically (oldest first) before being written.
-type DayBuffer struct {
-	lines map[string][]dayLine
+// MonthBuffer accumulates JSONL lines grouped by conversation and month. Lines
+// of a conversation+month are sorted chronologically (oldest first) before
+// being written.
+type MonthBuffer struct {
+	lines map[string][]monthLine
 }
 
-type dayLine struct {
+type monthLine struct {
 	ts   int64
 	data []byte
 }
 
-// NewDayBuffer creates an empty day buffer.
-func NewDayBuffer() *DayBuffer {
-	return &DayBuffer{lines: make(map[string][]dayLine)}
+// NewMonthBuffer creates an empty month buffer.
+func NewMonthBuffer() *MonthBuffer {
+	return &MonthBuffer{lines: make(map[string][]monthLine)}
 }
 
-// Add appends a JSONL line to the buffer of the day derived from the entry timestamp.
-func (b *DayBuffer) Add(entry *Entry) error {
+// Add appends a JSONL line to the buffer of the conversation+month derived
+// from the entry timestamp and the conversation metadata.
+func (b *MonthBuffer) Add(entry *Entry, meta ConversationMeta) error {
 	line, err := MarshalEntry(entry)
 	if err != nil {
 		return err
@@ -45,31 +47,32 @@ func (b *DayBuffer) Add(entry *Entry) error {
 	if err != nil {
 		return fmt.Errorf("failed to parse entry timestamp %q: %w", entry.Timestamp, err)
 	}
-	day := ts.Format("2006-01-02")
+	month := ts.Format("2006-01")
+	key := monthKey(meta.TeamName, meta.DisplayName, month)
 
-	b.lines[day] = append(b.lines[day], dayLine{ts: ts.UnixMilli(), data: append(line, '\n')})
+	b.lines[key] = append(b.lines[key], monthLine{ts: ts.UnixMilli(), data: append(line, '\n')})
 	return nil
 }
 
-// Days returns the sorted list of day keys.
-func (b *DayBuffer) Days() []string {
-	days := make([]string, 0, len(b.lines))
-	for day := range b.lines {
-		days = append(days, day)
+// Keys returns the sorted list of conversation+month keys.
+func (b *MonthBuffer) Keys() []string {
+	keys := make([]string, 0, len(b.lines))
+	for k := range b.lines {
+		keys = append(keys, k)
 	}
-	sort.Strings(days)
-	return days
+	sort.Strings(keys)
+	return keys
 }
 
-// LineCount returns the number of buffered lines for a day.
-func (b *DayBuffer) LineCount(day string) int {
-	return len(b.lines[day])
+// LineCount returns the number of buffered lines for a key.
+func (b *MonthBuffer) LineCount(key string) int {
+	return len(b.lines[key])
 }
 
-// Content returns the buffered lines of a day as a single byte slice, in
-// chronological order (oldest first).
-func (b *DayBuffer) Content(day string) ([]byte, error) {
-	lines := b.lines[day]
+// Content returns the buffered lines of a conversation+month as a single byte
+// slice, in chronological order (oldest first).
+func (b *MonthBuffer) Content(key string) ([]byte, error) {
+	lines := b.lines[key]
 	sort.Slice(lines, func(i, j int) bool {
 		return lines[i].ts < lines[j].ts
 	})
@@ -81,35 +84,39 @@ func (b *DayBuffer) Content(day string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Flush uploads each day's buffered lines as a single S3 object in
-// the layout jsonl/mattermost/<year>/<month>/<day>/<date>.jsonl.
-// Lines of a day are written in chronological order (oldest first).
-func (b *DayBuffer) Flush(ctx context.Context, uploader ObjectPutter) error {
-	for _, day := range b.Days() {
-		key, err := DailyObjectKey(day)
+// Flush uploads each conversation+month's buffered lines as a single S3 object
+// in the layout jsonl/mattermost/<team>/<display-slug>/<year>/<month>.jsonl.
+// Lines of a conversation+month are written in chronological order (oldest first).
+func (b *MonthBuffer) Flush(ctx context.Context, uploader ObjectPutter) error {
+	for _, key := range b.Keys() {
+		teamName, displayName, month, err := ParseMonthKey(key)
 		if err != nil {
 			return err
 		}
 
-		content, err := b.Content(day)
+		objKey, err := JSONLObjectKey(teamName, displayName, month)
 		if err != nil {
 			return err
 		}
 
-		if err := uploader.Put(ctx, key, content, "application/x-ndjson"); err != nil {
+		content, err := b.Content(key)
+		if err != nil {
+			return err
+		}
+
+		if err := uploader.Put(ctx, objKey, content, "application/x-ndjson"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// DailyObjectKey computes the object storage key for a day (format YYYY-MM-DD):
-// jsonl/mattermost/<year>/<month>/<day>/<date>.jsonl
-func DailyObjectKey(day string) (string, error) {
-	ts, err := time.Parse("2006-01-02", day)
+// JSONLObjectKey computes the object storage key for a conversation+month:
+// jsonl/mattermost/<team>/<display-slug>/<year>/<month>.jsonl
+func JSONLObjectKey(teamName, displayName, month string) (string, error) {
+	path, err := conversationObjectPath(teamName, displayName, month)
 	if err != nil {
-		return "", fmt.Errorf("invalid day %q: %w", day, err)
+		return "", err
 	}
-	return fmt.Sprintf("jsonl/mattermost/%d/%02d/%02d/%s.jsonl",
-		ts.Year(), int(ts.Month()), ts.Day(), day), nil
+	return "jsonl/" + path + ".jsonl", nil
 }

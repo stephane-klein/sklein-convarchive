@@ -45,9 +45,9 @@ The `conversations` bucket is created automatically on the first `mattermost arc
 ## Object Storage Layout
 
 - Bucket default: `conversations`
-- Key layout (raw JSONL): `jsonl/mattermost/<year>/<month>/<day>/<date>.jsonl`
+- Key layout (raw JSONL): `jsonl/mattermost/<team>/<display-slug>/<year>/<month>.jsonl`
 - Key layout (human-readable Markdown): `markdown/mattermost/<team>/<display-slug>/<year>/<month>.md`
-- One JSONL object per day, one Markdown object per conversation+month, both uploaded once at end of batch (S3 has no native append)
+- One JSONL object per conversation+month, one Markdown object per conversation+month, both uploaded once at end of batch (S3 has no native append)
 - Markdown generation lives in `pkg/archive/markdown.go`, wired in parallel with the JSONL buffer in `cmd/mattermost.go`
 
 ## Supplementary Documentation
