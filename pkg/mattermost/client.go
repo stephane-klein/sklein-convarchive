@@ -111,24 +111,6 @@ func (c *Client) GetTeamsForUser(ctx context.Context, userID string) ([]Team, er
 	return teams, nil
 }
 
-// GetPublicChannelsForTeam lists public channels of a team, with pagination.
-func (c *Client) GetPublicChannelsForTeam(ctx context.Context, teamID string, page, perPage int) ([]Channel, error) {
-	return c.listChannels(ctx, "/api/v4/teams/"+teamID+"/channels/public", page, perPage)
-}
-
-// GetPrivateChannelsForTeam lists private channels of a team, with pagination.
-func (c *Client) GetPrivateChannelsForTeam(ctx context.Context, teamID string, page, perPage int) ([]Channel, error) {
-	return c.listChannels(ctx, "/api/v4/teams/"+teamID+"/channels/private", page, perPage)
-}
-
-func (c *Client) listChannels(ctx context.Context, endpoint string, page, perPage int) ([]Channel, error) {
-	var channels []Channel
-	if err := c.doGet(ctx, endpoint+"?page="+itoa(page)+"&per_page="+itoa(perPage), &channels); err != nil {
-		return nil, err
-	}
-	return channels, nil
-}
-
 // GetPostsForChannel lists posts of a channel, with pagination.
 func (c *Client) GetPostsForChannel(ctx context.Context, channelID string, page, perPage int) (*PostList, error) {
 	var list PostList

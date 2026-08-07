@@ -220,65 +220,56 @@ func runArchive() {
 			fmt.Printf("  channel %q: %d posts\n", channel.Name, postCount)
 		}
 	} else {
+		// List all channels the user is a member of (public, private, direct,
+		// group). This only requires the user's own session, no system admin.
+		channels, err := mattermostClient.GetChannelsForUser(ctx, me.Id)
+		if err != nil {
+			printError("failed to list channels: %v", err)
+			os.Exit(1)
+		}
+
+		teamNames := make(map[string]string, len(teams))
+		for _, t := range teams {
+			teamNames[t.Id] = t.Name
+		}
+
 		if teamFlag != "" {
 			team, err := findTeamByName(teams, teamFlag)
 			if err != nil {
 				printError("%v", err)
 				os.Exit(1)
 			}
-			teams = []mattermost.Team{*team}
+			// Restrict to the channels of that team (direct/group channels
+			// have an empty team_id and are naturally excluded).
+			teamChannels := []mattermost.Channel{}
+			for _, ch := range channels {
+				if ch.TeamId == team.Id {
+					teamChannels = append(teamChannels, ch)
+				}
+			}
+			channels = teamChannels
+			fmt.Printf("  team %q: %d channels\n", team.Name, len(channels))
+		} else {
+			fmt.Printf("  all accessible conversations: %d channels\n", len(channels))
 		}
 
-		for _, team := range teams {
-			channels := []mattermost.Channel{}
-			for _, fetch := range []func(int, int) ([]mattermost.Channel, error){
-				func(page, perPage int) ([]mattermost.Channel, error) {
-					return mattermostClient.GetPublicChannelsForTeam(ctx, team.Id, page, perPage)
-				},
-				func(page, perPage int) ([]mattermost.Channel, error) {
-					return mattermostClient.GetPrivateChannelsForTeam(ctx, team.Id, page, perPage)
-				},
-			} {
-				for page := 0; ; page++ {
-					pageChannels, err := fetch(page, perPage)
-					if err != nil {
-						printError("failed to list channels of team %q: %v", team.Name, err)
-						os.Exit(1)
-					}
-					channels = append(channels, pageChannels...)
-					if len(pageChannels) < perPage {
-						break
-					}
-				}
+		for _, channel := range channels {
+			meta, err := conversationMeta(ctx, mattermostClient, userCache, me.Id, channel)
+			if err != nil {
+				printError("failed to resolve conversation metadata: %v", err)
+				os.Exit(1)
 			}
-
-			fmt.Printf("  team %q: %d channels\n", team.Name, len(channels))
-
-			for _, channel := range channels {
-				displayName := channel.DisplayName
-				if displayName == "" {
-					displayName = channel.Name
+			postCount, err := archiveChannel(ctx, mattermostClient, userCache, buffer, mdBuffer, startMs, endMs, loc, teamNames[channel.TeamId], meta, channel, progressFunc(channel.Name))
+			if err != nil {
+				if ctx.Err() != nil {
+					interrupted = true
+					break
 				}
-				meta := archive.ConversationMeta{
-					Type:        channel.Type,
-					DisplayName: displayName,
-					ChannelName: channel.Name,
-				}
-				postCount, err := archiveChannel(ctx, mattermostClient, userCache, buffer, mdBuffer, startMs, endMs, loc, team.Name, meta, channel, progressFunc(channel.Name))
-				if err != nil {
-					if ctx.Err() != nil {
-						interrupted = true
-						break
-					}
-					printError("failed to archive channel %q: %v", channel.Name, err)
-					os.Exit(1)
-				}
-				fmt.Fprintln(os.Stderr)
-				fmt.Printf("    channel %q: %d posts\n", channel.Name, postCount)
+				printError("failed to archive channel %q: %v", channel.Name, err)
+				os.Exit(1)
 			}
-			if interrupted {
-				break
-			}
+			fmt.Fprintln(os.Stderr)
+			fmt.Printf("    channel %q: %d posts\n", channel.Name, postCount)
 		}
 	}
 
