@@ -166,7 +166,7 @@ Objects are encrypted client-side with [age](https://age-encryption.org/) before
    $ ./sklein-convarchive mattermost archive --encrypt
    ```
 
-   Encryption can also be enabled in config (`encrypt = true`, `age_recipient = "age1..."` in `.sklein-convarchive.toml`).
+   Encryption can also be enabled in the local config (the `[age]` section of `.sklein-convarchive.toml`, see below).
 
 Encrypted objects keep the same path layout with a `.age` suffix, e.g. `jsonl/mattermost/2026/08/03/2026-08-03.jsonl.age`.
 
@@ -232,7 +232,23 @@ The `rustfs` remote is already connected to the object storage through environme
 
 ### Configuration
 
-A local `.sklein-convarchive.toml` file can also be used (see `.sklein-convarchive.toml.example`).
+A local `.sklein-convarchive.toml` file can also be used (see `.sklein-convarchive.toml.example`):
+
+```toml
+[mattermost]
+server_url = "https://chat.example.com"
+token = "..."
+
+[s3]
+endpoint = "http://localhost:9000"
+access_key = "..."
+secret_key = "..."
+bucket = "conversations"
+
+[age]
+recipient = "age1..."  # required when encrypt = true
+encrypt = true         # optional, encrypt every object with age before upload
+```
 
 Priority order (highest to lowest):
 

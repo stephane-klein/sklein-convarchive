@@ -719,12 +719,12 @@ func isDryRun() bool {
 // otherwise. The age recipient is required and validated as early as possible
 // so a misconfigured run fails before any data is fetched.
 func getEncryptor() (*archive.Encryptor, error) {
-	if !viper.GetBool("encrypt") {
+	if !viper.GetBool("age.encrypt") {
 		return nil, nil
 	}
 	recipient := viper.GetString("age.recipient")
 	if recipient == "" {
-		return nil, fmt.Errorf("--encrypt requires an age recipient (flag --age-recipient, env AGE_RECIPIENT, or config age_recipient)")
+		return nil, fmt.Errorf("--encrypt requires an age recipient (flag --age-recipient, env AGE_RECIPIENT, or config [age].recipient)")
 	}
 	return archive.NewEncryptor(recipient)
 }
