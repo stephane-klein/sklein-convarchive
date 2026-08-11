@@ -44,7 +44,7 @@ func (b *MarkdownBuffer) Add(entry *Entry, meta ConversationMeta) error {
 		return fmt.Errorf("failed to parse entry timestamp %q: %w", entry.Timestamp, err)
 	}
 	month := ts.Format("2006-01")
-	key := monthKey(meta.TeamName, meta.DisplayName, month)
+	key := MonthKey(meta.TeamName, meta.DisplayName, month)
 
 	group, ok := b.months[key]
 	if !ok {
@@ -143,27 +143,44 @@ func (b *MarkdownBuffer) Render(key string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// FlushKey renders and uploads a single conversation+month as one Markdown
+// object and frees its buffered entries. It is a no-op when the key has no
+// entries.
+func (b *MarkdownBuffer) FlushKey(ctx context.Context, uploader ObjectPutter, key string) error {
+	group, ok := b.months[key]
+	if !ok || len(group.entries) == 0 {
+		return nil
+	}
+
+	teamName, displayName, month, err := ParseMonthKey(key)
+	if err != nil {
+		return err
+	}
+
+	objKey, err := MarkdownObjectKey(teamName, displayName, month)
+	if err != nil {
+		return err
+	}
+
+	content, err := b.Render(key)
+	if err != nil {
+		return err
+	}
+
+	if err := uploader.Put(ctx, objKey, content, "text/markdown"); err != nil {
+		return err
+	}
+
+	delete(b.months, key)
+	return nil
+}
+
 // Flush renders and uploads each buffered conversation+month as a single
 // Markdown object in the layout
 // markdown/mattermost/<team>/<display>/<year>/<month>.md.
 func (b *MarkdownBuffer) Flush(ctx context.Context, uploader ObjectPutter) error {
 	for _, key := range b.Keys() {
-		teamName, displayName, month, err := ParseMonthKey(key)
-		if err != nil {
-			return err
-		}
-
-		objKey, err := MarkdownObjectKey(teamName, displayName, month)
-		if err != nil {
-			return err
-		}
-
-		content, err := b.Render(key)
-		if err != nil {
-			return err
-		}
-
-		if err := uploader.Put(ctx, objKey, content, "text/markdown"); err != nil {
+		if err := b.FlushKey(ctx, uploader, key); err != nil {
 			return err
 		}
 	}
@@ -404,7 +421,8 @@ func monthFromEntries(entries []*Entry) string {
 	return ts.Format("2006-01")
 }
 
-func monthKey(teamName, displayName, month string) string {
+// MonthKey builds the buffer key of a conversation+month: team|display|month.
+func MonthKey(teamName, displayName, month string) string {
 	return teamName + "|" + displayName + "|" + month
 }
 

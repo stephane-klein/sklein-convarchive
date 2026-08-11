@@ -15,6 +15,7 @@ import (
 
 	"github.com/stephane-klein/sklein-convarchive/pkg/archive"
 	"github.com/stephane-klein/sklein-convarchive/pkg/mattermost"
+	"github.com/stephane-klein/sklein-convarchive/pkg/ui"
 )
 
 type mattermostAuthConfig struct {
@@ -146,7 +147,6 @@ func runArchive() {
 			printError("%v", err)
 			os.Exit(1)
 		}
-		fmt.Printf("Period:   %s (UTC)\n", periodFlag)
 	}
 
 	mattermostClient, me, err := connectMattermost(ctx, auth)
@@ -161,12 +161,28 @@ func runArchive() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Authenticated as %s (%d teams)\n", me.Username, len(teams))
-
 	userCache := newUserCache(mattermostClient)
 	buffer := archive.NewMonthBuffer()
 	mdBuffer := archive.NewMarkdownBuffer()
 	interrupted := false
+	flushedMonths := 0
+
+	var uploader archive.ObjectPutter
+	if !isDryRun() {
+		uploader, err = archive.NewUploader(ctx, s3.Endpoint, s3.AccessKey, s3.SecretKey, s3.Bucket, s3.UseSSL)
+		if err != nil {
+			printError("failed to connect to object storage: %v", err)
+			os.Exit(1)
+		}
+		if encryptor != nil {
+			uploader = archive.NewEncryptingUploader(uploader, encryptor)
+		}
+	}
+
+	d := ui.New(os.Stderr)
+	if periodFlag != "" {
+		fmt.Fprintf(os.Stderr, "Period to archive: %s\n", periodFlag)
+	}
 
 	// Target a specific channel (by ID, or by name+team).
 	if channelFlag != "" {
@@ -200,24 +216,24 @@ func runArchive() {
 			teamName = team.Name
 		}
 
-		meta, err := conversationMeta(ctx, mattermostClient, userCache, me.Id, *channel)
+		meta, err := conversationMeta(ctx, mattermostClient, userCache, me.Id, *channel, teamName)
 		if err != nil {
 			printError("failed to resolve conversation participants: %v", err)
 			os.Exit(1)
 		}
 
-		postCount, err := archiveChannel(ctx, mattermostClient, userCache, buffer, mdBuffer, startMs, endMs, loc, teamName, meta, *channel, progressFunc(channel.Name))
+		fmt.Fprintf(os.Stderr, "Conversation to archive: %s\n", meta.DisplayName)
+
+		convTask := d.Root(conversationTaskTitle(meta.DisplayName, teamName))
+		_, err = archiveConversation(ctx, mattermostClient, userCache, buffer, mdBuffer, uploader, d, &flushedMonths, startMs, endMs, loc, meta, *channel, convTask)
 		if err != nil {
 			if ctx.Err() != nil {
 				interrupted = true
 			} else {
+				d.Stop()
 				printError("failed to archive channel %q: %v", channel.Name, err)
 				os.Exit(1)
 			}
-		}
-		fmt.Fprintln(os.Stderr)
-		if !interrupted {
-			fmt.Printf("  channel %q: %d posts\n", channel.Name, postCount)
 		}
 	} else {
 		// List all channels the user is a member of (public, private, direct,
@@ -248,38 +264,44 @@ func runArchive() {
 				}
 			}
 			channels = teamChannels
-			fmt.Printf("  team %q: %d channels\n", team.Name, len(channels))
+			fmt.Fprintf(os.Stderr, "Team to archive: %s (%d channels)\n", team.Name, len(channels))
 		} else {
-			fmt.Printf("  all accessible conversations: %d channels\n", len(channels))
+			fmt.Fprintf(os.Stderr, "Conversations to archive: %d\n", len(channels))
 		}
 
+		d.Start()
+
 		for _, channel := range channels {
-			meta, err := conversationMeta(ctx, mattermostClient, userCache, me.Id, channel)
+			meta, err := conversationMeta(ctx, mattermostClient, userCache, me.Id, channel, teamNames[channel.TeamId])
 			if err != nil {
 				printError("failed to resolve conversation metadata: %v", err)
 				os.Exit(1)
 			}
-			postCount, err := archiveChannel(ctx, mattermostClient, userCache, buffer, mdBuffer, startMs, endMs, loc, teamNames[channel.TeamId], meta, channel, progressFunc(channel.Name))
+
+			convTask := d.Root(conversationTaskTitle(meta.DisplayName, teamNames[channel.TeamId]))
+			_, err = archiveConversation(ctx, mattermostClient, userCache, buffer, mdBuffer, uploader, d, &flushedMonths, startMs, endMs, loc, meta, channel, convTask)
 			if err != nil {
 				if ctx.Err() != nil {
 					interrupted = true
 					break
 				}
+				d.Stop()
 				printError("failed to archive channel %q: %v", channel.Name, err)
 				os.Exit(1)
 			}
-			fmt.Fprintln(os.Stderr)
-			fmt.Printf("    channel %q: %d posts\n", channel.Name, postCount)
 		}
 	}
 
 	if interrupted {
+		d.Stop()
 		fmt.Fprintln(os.Stderr)
-		fmt.Println("Interrupted, fetching stopped")
+		fmt.Fprintln(os.Stderr, "Interrupted, fetching stopped")
 	}
 
 	if isDryRun() {
-		fmt.Println("Dry run: no upload performed")
+		d.Stop()
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Dry run: no upload performed")
 		for _, key := range buffer.Keys() {
 			teamName, displayName, month, err := archive.ParseMonthKey(key)
 			if err != nil {
@@ -294,7 +316,7 @@ func runArchive() {
 			if encryptor != nil {
 				objKey += ".age"
 			}
-			fmt.Printf("  would upload %s (%d lines)\n", objKey, buffer.LineCount(key))
+			fmt.Fprintf(os.Stderr, "  would upload %s (%d lines)\n", objKey, buffer.LineCount(key))
 		}
 		for _, key := range mdBuffer.Keys() {
 			teamName, displayName, month, err := archive.ParseMonthKey(key)
@@ -310,7 +332,7 @@ func runArchive() {
 			if encryptor != nil {
 				objKey += ".age"
 			}
-			fmt.Printf("  would upload markdown %s (%d posts)\n", objKey, mdBuffer.LineCount(key))
+			fmt.Fprintf(os.Stderr, "  would upload markdown %s (%d posts)\n", objKey, mdBuffer.LineCount(key))
 		}
 		if interrupted {
 			os.Exit(130)
@@ -319,32 +341,166 @@ func runArchive() {
 	}
 
 	if interrupted {
-		fmt.Fprintln(os.Stderr)
-		fmt.Println("Interrupted, nothing uploaded (a partial month must never replace a complete one)")
+		fmt.Fprintf(os.Stderr, "Interrupted: %d complete month(s) already uploaded; the partially-fetched month was not\n", flushedMonths)
 		os.Exit(130)
 	}
 
-	var uploader archive.ObjectPutter
-	uploader, err = archive.NewUploader(ctx, s3.Endpoint, s3.AccessKey, s3.SecretKey, s3.Bucket, s3.UseSSL)
+	d.Stop()
+}
+
+// archiveConversation archives a single conversation and renders it as a task
+// tree in the display: one child per pre-listed month, processed from the
+// oldest to the newest. Each month is uploaded as soon as it is complete
+// (incremental upload), so a partially-fetched month is never written to the
+// object storage. Returns the number of archived posts.
+func archiveConversation(
+	ctx context.Context,
+	client *mattermost.Client,
+	userCache *userCache,
+	buffer *archive.MonthBuffer,
+	mdBuffer *archive.MarkdownBuffer,
+	uploader archive.ObjectPutter, // nil in dry-run mode: nothing is uploaded
+	display *ui.Display,
+	flushedMonths *int,
+	startMs, endMs int64,
+	loc *time.Location,
+	meta archive.ConversationMeta,
+	channel mattermost.Channel,
+	convTask *ui.Task,
+) (int, error) {
+	convTask.Status = ui.StatusRunning
+	convTask.MaxVisibleChildren = 10
+	convTask.AnchorFirstWhenPending = true
+	display.Start()
+
+	months, emptyText := planMonths(ctx, client, loc, channel, startMs, endMs)
+	if emptyText != "" {
+		convTask.Status = ui.StatusSuccess
+		convTask.StatusText = emptyText
+		display.Redraw()
+		return 0, nil
+	}
+
+	monthTasks := make([]*ui.Task, 0, len(months))
+	for _, m := range months {
+		monthTasks = append(monthTasks, convTask.AddChild(meta.DisplayName+" "+m))
+	}
+
+	flushedSet := map[string]bool{}
+	var currentMonth string
+	allDone := false
+
+	setMonths := func() {
+		for i, t := range monthTasks {
+			key := months[i]
+			bufKey := archive.MonthKey(meta.TeamName, meta.DisplayName, key)
+			switch {
+			case allDone || key < currentMonth:
+				t.Status = ui.StatusSuccess
+				t.StatusText = monthStatusText(key, flushedSet, buffer.LineCount(bufKey) > 0)
+			case key == currentMonth:
+				t.Status = ui.StatusRunning
+				t.StatusText = "… in progress …"
+			default:
+				t.Status = ui.StatusPending
+				t.StatusText = ""
+			}
+		}
+	}
+
+	flushCompleted := func() error {
+		if uploader == nil {
+			return nil
+		}
+		for _, key := range months {
+			if flushedSet[key] {
+				continue
+			}
+			if !allDone && key >= currentMonth {
+				continue
+			}
+			bufKey := archive.MonthKey(meta.TeamName, meta.DisplayName, key)
+			if buffer.LineCount(bufKey) == 0 {
+				continue
+			}
+			if err := buffer.FlushKey(ctx, uploader, bufKey); err != nil {
+				return err
+			}
+			if err := mdBuffer.FlushKey(ctx, uploader, bufKey); err != nil {
+				return err
+			}
+			flushedSet[key] = true
+			*flushedMonths++
+		}
+		return nil
+	}
+
+	progress := func(fetched int, day string) error {
+		if day != "" {
+			currentMonth = day[:7]
+		}
+		convTask.StatusText = fmt.Sprintf("%d posts", fetched)
+		if err := flushCompleted(); err != nil {
+			return err
+		}
+		setMonths()
+		display.Redraw()
+		return nil
+	}
+
+	postCount, err := archiveChannel(ctx, client, userCache, buffer, mdBuffer, startMs, endMs, loc, meta, channel, progress)
 	if err != nil {
-		printError("failed to connect to object storage: %v", err)
-		os.Exit(1)
-	}
-	if encryptor != nil {
-		uploader = archive.NewEncryptingUploader(uploader, encryptor)
-	}
-
-	if err := buffer.Flush(ctx, uploader); err != nil {
-		printError("failed to upload: %v", err)
-		os.Exit(1)
-	}
-
-	if err := mdBuffer.Flush(ctx, uploader); err != nil {
-		printError("failed to upload markdown: %v", err)
-		os.Exit(1)
+		convTask.Status = ui.StatusError
+		if ctx.Err() != nil {
+			convTask.StatusText = "interrupted"
+			for i, t := range monthTasks {
+				if months[i] == currentMonth {
+					t.Status = ui.StatusError
+					t.StatusText = "interrupted"
+				}
+			}
+		}
+		display.Redraw()
+		return postCount, err
 	}
 
-	fmt.Println("Upload complete")
+	allDone = true
+	if err := flushCompleted(); err != nil {
+		return postCount, err
+	}
+	setMonths()
+	convTask.Status = ui.StatusSuccess
+	if postCount > 0 {
+		convTask.StatusText = "Ok"
+	} else {
+		convTask.StatusText = "no messages"
+	}
+	display.Redraw()
+	return postCount, nil
+}
+
+// monthStatusText renders the trailing status of a completed month task.
+// Months that were uploaded carry the "(uploaded)" marker; in dry-run mode
+// nothing is uploaded and the marker is omitted; months without messages show
+// "no messages".
+func monthStatusText(month string, flushedSet map[string]bool, hasData bool) string {
+	if flushedSet[month] {
+		return "Ok (uploaded)"
+	}
+	if isDryRun() && hasData {
+		return "Ok"
+	}
+	return "no messages"
+}
+
+// conversationTaskTitle prefixes the conversation display name with the team
+// when the channel belongs to one, so homonymous channels (e.g. "general" in
+// every team) stay distinguishable. Direct/group conversations have no team.
+func conversationTaskTitle(displayName, teamName string) string {
+	if teamName == "" {
+		return displayName
+	}
+	return teamName + "/" + displayName
 }
 
 // connectMattermost authenticates against the Mattermost server and returns
@@ -560,8 +716,9 @@ func resolveDirectInterlocutor(ctx context.Context, client *mattermost.Client, c
 // conversationMeta resolves the metadata needed to render the Markdown file
 // for a conversation. Public/private channels use their display name; direct
 // and group channels use their participants (sorted, without '@').
-func conversationMeta(ctx context.Context, client *mattermost.Client, cache *userCache, meID string, ch mattermost.Channel) (archive.ConversationMeta, error) {
+func conversationMeta(ctx context.Context, client *mattermost.Client, cache *userCache, meID string, ch mattermost.Channel, teamName string) (archive.ConversationMeta, error) {
 	meta := archive.ConversationMeta{
+		TeamName:    teamName,
 		Type:        ch.Type,
 		ChannelName: ch.Name,
 		DisplayName: ch.DisplayName,
@@ -572,6 +729,14 @@ func conversationMeta(ctx context.Context, client *mattermost.Client, cache *use
 
 	if ch.Type != "D" && ch.Type != "G" {
 		return meta, nil
+	}
+
+	// Direct and group conversations have no team; the object path carries a
+	// type label instead of a team slug.
+	if ch.Type == "D" {
+		meta.TeamName = "direct-messages"
+	} else {
+		meta.TeamName = "group-messages"
 	}
 
 	members, err := client.GetChannelMembers(ctx, ch.Id, 0, 100)
@@ -636,70 +801,44 @@ func archiveChannel(
 	mdBuffer *archive.MarkdownBuffer,
 	startMs, endMs int64,
 	loc *time.Location,
-	teamName string,
 	meta archive.ConversationMeta,
 	channel mattermost.Channel,
-	progress func(fetched int, day string),
+	progress func(fetched int, day string) error,
 ) (int, error) {
 	postCount := 0
-	filtered := startMs != 0 || endMs != 0
-	stopPagination := false
 	lastDay := ""
 
-	for page := 0; !stopPagination; page++ {
-		list, err := client.GetPostsForChannel(ctx, channel.Id, page, perPage)
-		if err != nil {
-			return postCount, err
-		}
-
-		for _, postID := range list.Order {
-			post := list.Posts[postID]
-			if post == nil {
-				continue
+	err := client.PostsAscending(ctx, channel.Id, startMs, endMs, perPage,
+		func() error {
+			if progress != nil {
+				return progress(postCount, lastDay)
 			}
-
-			if filtered {
-				// Posts are returned newest first, so once we hit a post older
-				// than the start of the period we can stop entirely.
-				if post.CreateAt < startMs {
-					stopPagination = true
-					break
-				}
-				if post.CreateAt > endMs {
-					continue
-				}
-			}
-
+			return nil
+		},
+		func(post *mattermost.Post) error {
 			lastDay = time.UnixMilli(post.CreateAt).In(loc).Format("2006-01-02")
 
 			username := userCache.Resolve(ctx, post.UserId)
 			entry := archive.NormalizePost(post, archive.ChannelContext{
-				TeamName:    teamName,
+				TeamName:    meta.TeamName,
 				ChannelName: channel.Name,
 				ServerURL:   client.ServerURL(),
 			}, loc)
 			entry.Author = username
 
 			if err := buffer.Add(entry, meta); err != nil {
-				return postCount, err
+				return err
 			}
 			if mdBuffer != nil {
 				if err := mdBuffer.Add(entry, meta); err != nil {
-					return postCount, err
+					return err
 				}
 			}
 			postCount++
-		}
-
-		if progress != nil {
-			progress(postCount, lastDay)
-		}
-
-		if len(list.Order) < perPage {
-			break
-		}
-	}
-	return postCount, nil
+			return nil
+		},
+	)
+	return postCount, err
 }
 
 func isDryRun() bool {
@@ -720,17 +859,62 @@ func getEncryptor() (*archive.Encryptor, error) {
 	return archive.NewEncryptor(recipient)
 }
 
-// progressFunc returns a progress callback that updates a single line on
-// stderr (via carriage return) as posts are fetched for a channel. Writing to
-// stderr keeps stdout clean for the final results.
-func progressFunc(channelName string) func(fetched int, day string) {
-	return func(fetched int, day string) {
-		if day != "" {
-			fmt.Fprintf(os.Stderr, "\r  archiving %q… %d posts (%s)", channelName, fetched, day)
-		} else {
-			fmt.Fprintf(os.Stderr, "\r  archiving %q… %d posts", channelName, fetched)
-		}
+// planMonths returns the ascending list of month keys to display for a
+// channel, bounded by the month of its newest post and either the period
+// start or the month of its oldest post (found by binary-searching the posts
+// pagination). The second return value is a status text when there is nothing
+// to list ("no messages" / "no messages in period"); an empty second value
+// with a nil month list means the range could not be determined, in which
+// case the caller degrades to a conversation-level task only.
+func planMonths(ctx context.Context, client *mattermost.Client, loc *time.Location, ch mattermost.Channel, startMs, endMs int64) ([]string, string) {
+	page0, err := client.GetPostsForChannel(ctx, ch.Id, 0, perPage)
+	if err != nil {
+		return nil, ""
 	}
+	if len(page0.Order) == 0 {
+		return nil, "no messages"
+	}
+	newest := page0.Posts[page0.Order[0]]
+	if newest == nil {
+		return nil, ""
+	}
+	top := time.UnixMilli(newest.CreateAt).In(loc).Format("2006-01")
+
+	bottom := ""
+	if startMs != 0 {
+		bottom = time.UnixMilli(startMs).In(loc).Format("2006-01")
+		if endTop := time.UnixMilli(endMs).In(loc).Format("2006-01"); top > endTop {
+			top = endTop
+		}
+	} else {
+		oldest, err := client.GetOldestPost(ctx, ch.Id, perPage)
+		if err != nil {
+			return nil, ""
+		}
+		if oldest == nil {
+			return nil, "no messages"
+		}
+		bottom = time.UnixMilli(oldest.CreateAt).In(loc).Format("2006-01")
+	}
+
+	if bottom > top {
+		return nil, "no messages in period"
+	}
+
+	months := []string{}
+	for m := bottom; m <= top; m = nextMonth(m) {
+		months = append(months, m)
+	}
+	return months, ""
+}
+
+// nextMonth returns the month key following key ("2006-01").
+func nextMonth(key string) string {
+	t, err := time.Parse("2006-01", key)
+	if err != nil {
+		return key
+	}
+	return t.AddDate(0, 1, 0).Format("2006-01")
 }
 
 // parsePeriod converts a period expression into a [start, end] range of

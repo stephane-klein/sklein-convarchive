@@ -48,7 +48,7 @@ func (b *MonthBuffer) Add(entry *Entry, meta ConversationMeta) error {
 		return fmt.Errorf("failed to parse entry timestamp %q: %w", entry.Timestamp, err)
 	}
 	month := ts.Format("2006-01")
-	key := monthKey(meta.TeamName, meta.DisplayName, month)
+	key := MonthKey(meta.TeamName, meta.DisplayName, month)
 
 	b.lines[key] = append(b.lines[key], monthLine{ts: ts.UnixMilli(), data: append(line, '\n')})
 	return nil
@@ -84,27 +84,42 @@ func (b *MonthBuffer) Content(key string) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// FlushKey uploads a single conversation+month as one JSONL object and frees
+// its buffered lines. It is a no-op when the key has no buffered lines.
+func (b *MonthBuffer) FlushKey(ctx context.Context, uploader ObjectPutter, key string) error {
+	if len(b.lines[key]) == 0 {
+		return nil
+	}
+
+	teamName, displayName, month, err := ParseMonthKey(key)
+	if err != nil {
+		return err
+	}
+
+	objKey, err := JSONLObjectKey(teamName, displayName, month)
+	if err != nil {
+		return err
+	}
+
+	content, err := b.Content(key)
+	if err != nil {
+		return err
+	}
+
+	if err := uploader.Put(ctx, objKey, content, "application/x-ndjson"); err != nil {
+		return err
+	}
+
+	delete(b.lines, key)
+	return nil
+}
+
 // Flush uploads each conversation+month's buffered lines as a single S3 object
 // in the layout jsonl/mattermost/<team>/<display-slug>/<year>/<month>.jsonl.
 // Lines of a conversation+month are written in chronological order (oldest first).
 func (b *MonthBuffer) Flush(ctx context.Context, uploader ObjectPutter) error {
 	for _, key := range b.Keys() {
-		teamName, displayName, month, err := ParseMonthKey(key)
-		if err != nil {
-			return err
-		}
-
-		objKey, err := JSONLObjectKey(teamName, displayName, month)
-		if err != nil {
-			return err
-		}
-
-		content, err := b.Content(key)
-		if err != nil {
-			return err
-		}
-
-		if err := uploader.Put(ctx, objKey, content, "application/x-ndjson"); err != nil {
+		if err := b.FlushKey(ctx, uploader, key); err != nil {
 			return err
 		}
 	}

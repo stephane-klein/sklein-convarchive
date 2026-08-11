@@ -40,7 +40,8 @@ markdown/mattermost/<team>/<display-slug>/<year>/<month>.md
 
 - Every object corresponds to exactly one (conversation, month) pair — the finest selection filter exposed by the CLI.
 - `--period` no longer accepts `YYYY-MM-DD`: a daily filter would write a partial monthly object, breaking the 1:1 invariant and reintroducing the overwrite problem. Month is the smallest accepted temporal unit.
-- Interrupted runs do not upload months of incomplete conversations, so a partial object can never replace a complete one.
+- Months are uploaded incrementally as each one completes during the fetch (which runs oldest first): a month is written only once the traversal has passed below its start, so a partial object can never replace a complete one. The object storage uploader is therefore created before the fetch starts.
+- Interrupted runs keep the already-completed months that were uploaded, and never write the partially-fetched month.
 
 ### Consequences
 
@@ -48,6 +49,7 @@ markdown/mattermost/<team>/<display-slug>/<year>/<month>.md
 - Good, because no merge-on-upload machinery is needed (each month is written whole; re-archiving a month is idempotent).
 - Good, because the JSONL layer now aligns with the Markdown layer, which was already organized per conversation+month.
 - Good, because the number of objects is bounded by conversations × months instead of conversations × days.
+- Good, because the incremental upload both bounds the in-memory footprint and makes re-archiving resumable: already-archived months stay archived even if the run is interrupted.
 - Bad, because a very active channel produces a large monthly object, rewritten in full on every re-archive.
 - Bad, because day-granularity archiving is no longer possible.
 

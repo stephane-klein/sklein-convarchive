@@ -121,6 +121,144 @@ func (c *Client) GetPostsForChannel(ctx context.Context, channelID string, page,
 	return &list, nil
 }
 
+// GetOldestPost returns the oldest post of a channel, or nil when the channel
+// has no messages. The posts endpoint pages newest first, so the oldest post
+// is found by binary-searching the page number for the last non-empty page:
+// O(log P) requests instead of P.
+func (c *Client) GetOldestPost(ctx context.Context, channelID string, perPage int) (*Post, error) {
+	last, err := c.firstPageFrom(ctx, channelID, 0, perPage)
+	if err != nil {
+		return nil, err
+	}
+	if last < 0 {
+		return nil, nil
+	}
+
+	list, err := c.GetPostsForChannel(ctx, channelID, last, perPage)
+	if err != nil {
+		return nil, err
+	}
+	if len(list.Order) == 0 {
+		return nil, nil
+	}
+	return list.Posts[list.Order[len(list.Order)-1]], nil
+}
+
+// firstPageFrom returns the largest page index whose newest post has
+// CreateAt >= fromMs, or -1 when no such page exists (empty channel, or the
+// channel's newest post is older than fromMs). Pages are indexed newest first,
+// so this is the page where ascending iteration should start: with fromMs = 0
+// it is the last non-empty page, and with fromMs = startMs it is the page
+// containing the first post of the period.
+func (c *Client) firstPageFrom(ctx context.Context, channelID string, fromMs int64, perPage int) (int, error) {
+	// Page 0 must satisfy the predicate, otherwise there is nothing to iterate.
+	page0, err := c.GetPostsForChannel(ctx, channelID, 0, perPage)
+	if err != nil {
+		return -1, err
+	}
+	if newest := newestPost(page0); newest == nil || newest.CreateAt < fromMs {
+		return -1, nil
+	}
+
+	// Double the page bound until the predicate turns false or a page is empty.
+	lo, hi := 0, 1
+	for {
+		list, err := c.GetPostsForChannel(ctx, channelID, hi, perPage)
+		if err != nil {
+			return -1, err
+		}
+		if newest := newestPost(list); newest == nil || newest.CreateAt < fromMs {
+			break
+		}
+		lo = hi
+		hi *= 2
+		if hi > 1<<20 {
+			return -1, fmt.Errorf("channel %q has too many posts to bound", channelID)
+		}
+	}
+
+	// Binary search (lo, hi] for the largest page still satisfying the predicate.
+	last := lo
+	for lo <= hi {
+		mid := (lo + hi) / 2
+		list, err := c.GetPostsForChannel(ctx, channelID, mid, perPage)
+		if err != nil {
+			return -1, err
+		}
+		if newest := newestPost(list); newest != nil && newest.CreateAt >= fromMs {
+			last = mid
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return last, nil
+}
+
+// PostsAscending visits the posts of a channel in chronological order (oldest
+// first). It starts at the first post with CreateAt >= fromMs (the oldest post
+// when fromMs is 0) and stops after the first post with CreateAt > untilMs
+// (when untilMs != 0). fn is called once per post; pageDone is called after
+// each fetched page and may abort the traversal by returning an error.
+//
+// The ascending order comes from iterating the newest-first pages from the
+// last non-empty page down to page 0 and reversing each page's order, so the
+// traversal is gapless — unlike the `after` cursor, whose CreateAt comparison
+// silently drops posts sharing the anchor's exact millisecond.
+func (c *Client) PostsAscending(ctx context.Context, channelID string, fromMs, untilMs int64, perPage int, pageDone func() error, fn func(*Post) error) error {
+	first, err := c.firstPageFrom(ctx, channelID, fromMs, perPage)
+	if err != nil {
+		return err
+	}
+	if first < 0 {
+		return nil
+	}
+
+	for page := first; page >= 0; page-- {
+		list, err := c.GetPostsForChannel(ctx, channelID, page, perPage)
+		if err != nil {
+			return err
+		}
+
+		done := false
+		for i := len(list.Order) - 1; i >= 0; i-- {
+			post := list.Posts[list.Order[i]]
+			if post == nil {
+				continue
+			}
+			if post.CreateAt < fromMs {
+				continue
+			}
+			if untilMs != 0 && post.CreateAt > untilMs {
+				done = true
+				break
+			}
+			if err := fn(post); err != nil {
+				return err
+			}
+		}
+
+		if pageDone != nil {
+			if err := pageDone(); err != nil {
+				return err
+			}
+		}
+		if done {
+			return nil
+		}
+	}
+	return nil
+}
+
+// newestPost returns the first post of a page's order (the newest one), or nil
+// when the page is empty.
+func newestPost(list *PostList) *Post {
+	if list == nil || len(list.Order) == 0 {
+		return nil
+	}
+	return list.Posts[list.Order[0]]
+}
+
 // GetUsersByIds resolves user IDs to usernames in a single batch request.
 func (c *Client) GetUsersByIds(ctx context.Context, userIDs []string) ([]User, error) {
 	data, err := json.Marshal(userIDs)
