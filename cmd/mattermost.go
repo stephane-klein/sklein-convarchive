@@ -370,6 +370,7 @@ func archiveConversation(
 ) (int, error) {
 	display.Update(func() {
 		convTask.Status = ui.StatusRunning
+		convTask.StatusText = "… determining month range …"
 		convTask.MaxVisibleChildren = 10
 		convTask.AnchorFirstWhenPending = true
 		convTask.CollapseWhenInactive = true
