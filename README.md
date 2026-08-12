@@ -4,6 +4,15 @@ This project implements the idea described in [Projet 39 — "sklein-convarchive
 
 A centralized archiving system for multi-source conversations (Mattermost, Signal, OpenCode, Claude.ai, etc.) into Object Storage, using the open JSONL format, designed for long-term preservation and as a future RAG corpus.
 
+## Source Support
+
+Currently **only Mattermost** is implemented. The other sources are planned:
+
+- [x] Mattermost — fully implemented
+- [ ] Signal — planned
+- [ ] OpenCode — planned
+- [ ] Claude.ai — planned
+
 ## Features
 
 - Archive all your [Mattermost](https://github.com/mattermost/mattermost) conversations — channels, private groups, and 1-1 direct messages — into Object Storage (S3-compatible)
