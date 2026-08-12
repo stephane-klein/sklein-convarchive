@@ -11,6 +11,7 @@ A centralized archiving system for multi-source conversations (Mattermost, Signa
 - Works with the storage you may already use: AWS S3, Backblaze B2, Scaleway, MinIO, RustFS, etc.
 - Choose exactly what to archive: a specific conversation, one month, or a whole year
 - Get a clean, readable version of every conversation as Markdown, one file per conversation per month — perfect for browsing or sharing
+- Browse your archive interactively with `storage browse`: an in-terminal TUI that navigates the JSONL and Markdown layers by source, team, conversation, and month, reading straight from the object storage
 - Keep your local time: timestamps are shown in your timezone (default Europe/Paris), with automatic handling of daylight saving time
 - Test that everything works before archiving: check your Mattermost access and your object storage connection in one command
 - Safe by design: nothing is uploaded until you say so (dry-run mode), and an interrupted run never uploads partial data
@@ -98,6 +99,7 @@ This project was developed using:
 - Object Storage client: [minio-go](https://github.com/minio/minio-go)
 - Encryption: [age](https://age-encryption.org/) (`filippo.io/age`) — client-side encryption of every object before upload
 - Compression: [klauspost/compress](https://github.com/klauspost/compress) (zstd) — every object is compressed before upload
+- Terminal UI: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Bubbles](https://github.com/charmbracelet/bubbles) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) (charmbracelet) — powers `storage browse`
 - Local dev object storage: [RustFS](https://github.com/rustfs/rustfs) via Podman Compose (MinIO community edition was archived in February 2026)
 - Tooling: [mise](https://mise.jdx.dev)
 
@@ -194,7 +196,37 @@ $ ./sklein-convarchive mattermost archive --conversation <id>                   
 - `--period` accepts `YYYY-MM` (month) or `YYYY` (year)
 - `--timezone`: IANA timezone used for timestamps in the render and for day/month boundaries (default `Europe/Paris`; the JSONL stores the local offset, the `raw` field keeps the absolute epoch)
 
-### Browse, decrypt, and delete an archive with rclone
+### Browse the archive with the terminal UI
+
+`storage browse` opens an interactive TUI to explore the archive directly in your terminal. It lists the object storage once at startup, then lets you drill down from layer (JSONL or Markdown) to source, team, conversation, year, and month.
+
+```bash
+$ ./sklein-convarchive storage browse
+```
+
+Navigation keys:
+
+| Key | Action |
+|:----|:-------|
+| `enter`/`→` | open the selected item |
+| `esc`/`←` | go back one level |
+| `↑`/`↓` | move the selection |
+| `/` | filter the current list |
+| `q` | quit the reading view, then the app |
+| `r` | toggle JSONL between parsed and pretty views |
+| `R` | toggle the raw field in the pretty JSON view |
+| `g` | refresh the object listing |
+
+The Markdown layer is shown as-is; the JSONL layer is rendered as a parsed entry list, or as pretty-printed JSON with `r`. When your archive is encrypted with age, provide the private key so the TUI can decrypt on the fly — either the key file or the raw key content:
+
+```bash
+$ ./sklein-convarchive storage browse --age-identity age.key
+$ ./sklein-convarchive storage browse --age-identity "AGE-SECRET-KEY-1..."
+```
+
+The identity can also be configured in the `[age]` section (see [Configuration](#configuration)).
+
+### Read, decrypt, and manage an archive with rclone
 
 `sklein-convarchive` writes plain S3 objects, so any S3 client can read them back. [rclone](https://rclone.org/) (MIT-licensed, actively maintained) works with RustFS and any S3-compatible endpoint, and pipes naturally into `age` for decryption. (The MinIO client `mc` is archived since late 2025, so rclone is the recommended tool here.)
 
@@ -250,6 +282,7 @@ bucket = "conversations"
 [age]
 recipient = "age1..."  # required when encrypt = true
 encrypt = true         # optional, encrypt every object with age before upload
+# identity = "/path/to/age.key"  # age private key (file path or AGE-SECRET-KEY-1... content), required by `storage browse` to read encrypted objects
 ```
 
 Priority order (highest to lowest):

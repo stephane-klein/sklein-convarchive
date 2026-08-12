@@ -18,3 +18,4 @@ bucket = "conversations"
 [age]
 # recipient = "age1..."
 # encrypt = true
+# identity = "/path/to/age.key"   # age private key (file path or AGE-SECRET-KEY-1... content), required by `storage browse` to read encrypted (.age) objects

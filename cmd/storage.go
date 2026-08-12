@@ -13,19 +13,35 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/stephane-klein/sklein-convarchive/pkg/archive"
+	"github.com/stephane-klein/sklein-convarchive/pkg/browse"
 )
 
 func init() {
 	rootCmd.AddCommand(storageCmd)
 	storageCmd.AddCommand(storageTestCmd)
+	storageCmd.AddCommand(storageBrowseCmd)
+
+	storageBrowseCmd.Flags().String("age-identity", "", "Age private key (file path or AGE-SECRET-KEY-1... content)")
+	viper.BindPFlag("age.identity", storageBrowseCmd.Flags().Lookup("age-identity"))
+	viper.BindEnv("age.identity", "AGE_IDENTITY")
 }
 
 var storageCmd = &cobra.Command{
 	Use:   "storage",
 	Short: "Object storage commands",
-	Long:  `Commands for testing access to the S3-compatible object storage.`,
+	Long:  `Commands for testing and browsing the S3-compatible object storage.`,
+}
+
+var storageBrowseCmd = &cobra.Command{
+	Use:   "browse",
+	Short: "Browse the archived conversations in the object storage",
+	Long:  `Opens an interactive TUI to navigate the archive (jsonl and markdown layers) by source, conversation, and month.`,
+	Run: func(cmd *cobra.Command, args []string) {
+		runStorageBrowse()
+	},
 }
 
 var storageTestCmd = &cobra.Command{
@@ -112,4 +128,26 @@ func runStorageTest() {
 	}
 
 	fmt.Println("Round-trip: OK")
+}
+
+// runStorageBrowse starts the interactive archive browser.
+func runStorageBrowse() {
+	cfg := getS3Config()
+	if cfg.Endpoint == "" || cfg.AccessKey == "" || cfg.SecretKey == "" {
+		printError("object storage endpoint, access key, and secret key are required (flags --s3-*, env S3_*, or config)")
+		os.Exit(1)
+	}
+
+	err := browse.Run(browse.Config{
+		Endpoint:    cfg.Endpoint,
+		AccessKey:   cfg.AccessKey,
+		SecretKey:   cfg.SecretKey,
+		Bucket:      cfg.Bucket,
+		UseSSL:      cfg.UseSSL,
+		AgeIdentity: viper.GetString("age.identity"),
+	}, os.Stdin, os.Stdout)
+	if err != nil {
+		printError("browse failed: %v", err)
+		os.Exit(1)
+	}
 }
