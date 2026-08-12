@@ -17,10 +17,32 @@ type ObjectPutter interface {
 	Put(ctx context.Context, key string, data []byte, contentType string) error
 }
 
+// StepInfo describes one processing step of an upload and carries the sizes
+// that the reporting layer knows: OriginalBytes is set by the compressing
+// layer (the plaintext size entering the chain) and StoredBytes by the base
+// uploader (the final stored size).
+type StepInfo struct {
+	Step          string // "compressing", "encrypting", "uploading"
+	OriginalBytes int64
+	StoredBytes   int64
+}
+
+// StepFunc reports the current processing step of an upload, so a caller can
+// surface it in a progress display.
+type StepFunc func(info StepInfo)
+
+// StepSetter is implemented by uploaders that can report their processing
+// steps. The chain built by NewChainedUploader propagates SetStep down to the
+// innermost uploader.
+type StepSetter interface {
+	SetStep(fn StepFunc)
+}
+
 // Uploader wraps the S3-compatible object storage client.
 type Uploader struct {
 	client *minio.Client
 	bucket string
+	step   StepFunc
 }
 
 // NormalizeEndpoint strips the scheme from an endpoint. minio-go builds the
@@ -53,8 +75,16 @@ func NewUploader(ctx context.Context, endpoint, accessKey, secretKey, bucket str
 	return &Uploader{client: client, bucket: bucket}, nil
 }
 
+// SetStep sets the step reporter called before the object is uploaded.
+func (u *Uploader) SetStep(fn StepFunc) {
+	u.step = fn
+}
+
 // Put uploads data to the given object key, overwriting if it exists.
 func (u *Uploader) Put(ctx context.Context, key string, data []byte, contentType string) error {
+	if u.step != nil {
+		u.step(StepInfo{Step: "uploading", StoredBytes: int64(len(data))})
+	}
 	_, err := u.client.PutObject(
 		ctx,
 		u.bucket,

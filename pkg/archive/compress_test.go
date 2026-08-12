@@ -105,7 +105,7 @@ func TestNewChainedUploaderKeys(t *testing.T) {
 
 	t.Run("compress only", func(t *testing.T) {
 		inner := &fakePutter{uploads: map[string][]byte{}}
-		up, err := NewChainedUploader(inner, true, nil)
+		up, err := NewChainedUploader(inner, true, nil, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +127,7 @@ func TestNewChainedUploaderKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 		inner := &fakePutter{uploads: map[string][]byte{}}
-		up, err := NewChainedUploader(inner, false, enc)
+		up, err := NewChainedUploader(inner, false, enc, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -149,7 +149,7 @@ func TestNewChainedUploaderKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 		inner := &fakePutter{uploads: map[string][]byte{}}
-		up, err := NewChainedUploader(inner, true, enc)
+		up, err := NewChainedUploader(inner, true, enc, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,4 +167,68 @@ func TestNewChainedUploaderKeys(t *testing.T) {
 			t.Fatalf("encrypted object %d bytes, want strictly smaller than plaintext %d", len(cipher), len(payload))
 		}
 	})
+}
+
+// stepPutter is a fake ObjectPutter that also implements StepSetter and
+// reports "uploading", standing in for the real S3 Uploader in chain tests.
+type stepPutter struct {
+	steps []string
+	fn    StepFunc
+	data  []byte
+}
+
+func (f *stepPutter) SetStep(fn StepFunc) { f.fn = fn }
+
+func (f *stepPutter) Put(_ context.Context, _ string, data []byte, _ string) error {
+	if f.fn != nil {
+		f.fn(StepInfo{Step: "uploading", StoredBytes: int64(len(data))})
+	}
+	f.data = append([]byte(nil), data...)
+	return nil
+}
+
+func TestNewChainedUploaderReportsStepsInOrder(t *testing.T) {
+	ident, err := age.GenerateX25519Identity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	enc, err := NewEncryptor(ident.Recipient().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	inner := &stepPutter{}
+	var infos []StepInfo
+	up, err := NewChainedUploader(inner, true, enc, func(info StepInfo) {
+		infos = append(infos, info)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	payload := []byte(strings.Repeat("archived message\n", 200))
+	if err := up.Put(context.Background(), "jsonl/x/y.jsonl", payload, "application/x-ndjson"); err != nil {
+		t.Fatal(err)
+	}
+
+	wantSteps := []string{"compressing", "encrypting", "uploading"}
+	if len(infos) != len(wantSteps) {
+		t.Fatalf("steps = %v, want %v", infos, wantSteps)
+	}
+	for i := range wantSteps {
+		if infos[i].Step != wantSteps[i] {
+			t.Fatalf("steps = %v, want %v", infos, wantSteps)
+		}
+	}
+	// The compressing layer reports the plaintext size, the base layer the
+	// final stored size.
+	if infos[0].OriginalBytes != int64(len(payload)) {
+		t.Errorf("OriginalBytes = %d, want %d", infos[0].OriginalBytes, len(payload))
+	}
+	if infos[2].StoredBytes != int64(len(inner.data)) {
+		t.Errorf("StoredBytes = %d, want %d", infos[2].StoredBytes, len(inner.data))
+	}
+	if infos[2].StoredBytes >= infos[0].OriginalBytes {
+		t.Errorf("stored %d >= original %d: compression reported no gain", infos[2].StoredBytes, infos[0].OriginalBytes)
+	}
 }

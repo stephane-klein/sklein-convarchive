@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/dustin/go-humanize"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
@@ -174,7 +175,7 @@ func runArchive() {
 			printError("failed to connect to object storage: %v", err)
 			os.Exit(1)
 		}
-		uploader, err = archive.NewChainedUploader(uploader, isCompress(), encryptor)
+		uploader, err = archive.NewChainedUploader(uploader, isCompress(), encryptor, nil)
 		if err != nil {
 			printError("failed to build uploader chain: %v", err)
 			os.Exit(1)
@@ -402,6 +403,7 @@ func archiveConversation(
 	})
 
 	flushedSet := map[string]bool{}
+	savings := map[string]monthSavings{}
 	var currentMonth string
 	allDone := false
 
@@ -412,10 +414,10 @@ func archiveConversation(
 			switch {
 			case allDone || key < currentMonth:
 				t.Status = ui.StatusSuccess
-				t.StatusText = monthStatusText(key, flushedSet, buffer.LineCount(bufKey) > 0)
+				t.StatusText = monthStatusText(key, flushedSet, buffer.LineCount(bufKey) > 0, savings[key])
 			case key == currentMonth:
 				t.Status = ui.StatusRunning
-				t.StatusText = "… in progress …"
+				t.StatusText = "… reading …"
 			default:
 				t.Status = ui.StatusPending
 				t.StatusText = ""
@@ -427,7 +429,7 @@ func archiveConversation(
 		if uploader == nil {
 			return nil
 		}
-		for _, key := range months {
+		for i, key := range months {
 			if flushedSet[key] {
 				continue
 			}
@@ -438,6 +440,22 @@ func archiveConversation(
 			if buffer.LineCount(bufKey) == 0 {
 				continue
 			}
+			// Surface the upload pipeline steps (compressing, encrypting,
+			// uploading) on this month's task while it is being written, and
+			// accumulate the original and stored sizes for the savings display.
+			var acc struct{ orig, stored int64 }
+			monthTask := monthTasks[i]
+			if ss, ok := uploader.(archive.StepSetter); ok {
+				ss.SetStep(func(info archive.StepInfo) {
+					acc.orig += info.OriginalBytes
+					acc.stored += info.StoredBytes
+					display.Update(func() {
+						monthTask.Status = ui.StatusRunning
+						monthTask.StatusText = fmt.Sprintf("… %s …", info.Step)
+					})
+				})
+			}
+			messages := buffer.LineCount(bufKey)
 			if err := buffer.FlushKey(ctx, uploader, bufKey); err != nil {
 				return err
 			}
@@ -445,6 +463,7 @@ func archiveConversation(
 				return err
 			}
 			flushedSet[key] = true
+			savings[key] = monthSavings{orig: acc.orig, stored: acc.stored, messages: messages}
 			*flushedMonths++
 		}
 		return nil
@@ -519,13 +538,29 @@ func collapsedSummary(months []string, meta archive.ConversationMeta, buffer *ar
 	return fmt.Sprintf("· %d %s", archived, label)
 }
 
+// monthSavings holds the size and message counts of a flushed month, captured
+// before the buffer keys are freed.
+type monthSavings struct {
+	orig, stored int64
+	messages     int
+}
+
 // monthStatusText renders the trailing status of a completed month task.
-// Months that were uploaded carry the "(uploaded)" marker; in dry-run mode
-// nothing is uploaded and the marker is omitted; months without messages show
+// Uploaded months show the message count and, when compression was applied,
+// the size savings (original → stored, percentage). In dry-run mode nothing
+// is uploaded and the marker is omitted; months without messages show
 // "no messages".
-func monthStatusText(month string, flushedSet map[string]bool, hasData bool) string {
+func monthStatusText(month string, flushedSet map[string]bool, hasData bool, saved monthSavings) string {
 	if flushedSet[month] {
-		return "Ok (uploaded)"
+		if saved.orig > 0 {
+			pct := int((saved.orig - saved.stored) * 100 / saved.orig)
+			if pct < 0 {
+				pct = 0
+			}
+			return fmt.Sprintf("Ok (uploaded · %d messages · %s → %s, %d%% saved)",
+				saved.messages, humanize.Bytes(uint64(saved.orig)), humanize.Bytes(uint64(saved.stored)), pct)
+		}
+		return fmt.Sprintf("Ok (uploaded · %d messages)", saved.messages)
 	}
 	if isDryRun() && hasData {
 		return "Ok"

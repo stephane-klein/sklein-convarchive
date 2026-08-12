@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	filippo.io/age v1.3.1
+	github.com/dustin/go-humanize v1.0.1
 	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.18.6
 	github.com/minio/minio-go/v7 v7.2.1
@@ -14,7 +15,6 @@ require (
 require (
 	filippo.io/hpke v0.4.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect

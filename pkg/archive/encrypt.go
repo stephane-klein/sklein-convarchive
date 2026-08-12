@@ -49,6 +49,7 @@ func (e *Encryptor) Encrypt(data []byte) ([]byte, error) {
 type EncryptingUploader struct {
 	inner ObjectPutter
 	enc   *Encryptor
+	step  StepFunc
 }
 
 // NewEncryptingUploader wraps an uploader so that every uploaded object is
@@ -57,8 +58,20 @@ func NewEncryptingUploader(inner ObjectPutter, enc *Encryptor) *EncryptingUpload
 	return &EncryptingUploader{inner: inner, enc: enc}
 }
 
+// SetStep sets the step reporter called before encryption and propagates it
+// to the wrapped uploader, so the whole chain reports its steps.
+func (u *EncryptingUploader) SetStep(fn StepFunc) {
+	u.step = fn
+	if s, ok := u.inner.(StepSetter); ok {
+		s.SetStep(fn)
+	}
+}
+
 // Put encrypts data, suffixes the key with ".age", and uploads it.
 func (u *EncryptingUploader) Put(ctx context.Context, key string, data []byte, contentType string) error {
+	if u.step != nil {
+		u.step(StepInfo{Step: "encrypting"})
+	}
 	ciphertext, err := u.enc.Encrypt(data)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt %s: %w", key, err)
