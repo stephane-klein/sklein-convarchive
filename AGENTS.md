@@ -33,6 +33,12 @@ All CLI flags that can be configured via config file are bound to Viper.
 - `owner` (default `stephane`): identity attributed to `human`/`user` messages of AI conversation exports (global flag, env `SKLEIN_CONVARCHIVE_OWNER`)
 - The `claude-chatgpt-backup-extension-export archive` command is an exception to the Viper convention: its import-specific flags (`--file`, `--source`, `--account`, `--period`) are read directly from the Cobra flags and are **not** bound to Viper/env/config — the command is always used explicitly, with one or more `--file` arguments (repeatable)
 
+## Test Data Policy
+
+- Test fixtures, golden files, `testdata/`, and inline examples MUST contain only synthetic/fake data — never real messages, usernames, emails, or content copied from actual sources (Mattermost, Signal, Claude.ai, ChatGPT, etc.)
+- Do not paste real conversation content into test code, even when debugging a real issue; craft a minimal synthetic reproduction instead
+- Redact or replace any real data found in existing tests when touched
+
 ## Dev Commands
 
 ```bash
