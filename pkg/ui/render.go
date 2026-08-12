@@ -47,6 +47,16 @@ func renderNode(t *Task, depth int, frame string) []string {
 	if t.StatusText != "" {
 		line += " " + t.StatusText
 	}
+
+	// Inactive collapsible tasks hide their children behind a summary line,
+	// keeping the tree compact (only the active task stays expanded).
+	if t.CollapseWhenInactive && !taskActive(t) {
+		if t.CollapsedSummary != "" {
+			line += " " + t.CollapsedSummary
+		}
+		return []string{line}
+	}
+
 	lines := []string{line}
 
 	if t.MaxVisibleChildren > 0 && len(t.children) > t.MaxVisibleChildren {
@@ -104,6 +114,11 @@ func allPending(children []*Task) bool {
 		}
 	}
 	return true
+}
+
+// taskActive reports whether a task is currently being processed or failed.
+func taskActive(t *Task) bool {
+	return t.Status == StatusRunning || t.Status == StatusError
 }
 
 // hiddenIndicator renders the "… N hidden children …" line for a parent task

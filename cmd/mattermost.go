@@ -368,23 +368,29 @@ func archiveConversation(
 	channel mattermost.Channel,
 	convTask *ui.Task,
 ) (int, error) {
-	convTask.Status = ui.StatusRunning
-	convTask.MaxVisibleChildren = 10
-	convTask.AnchorFirstWhenPending = true
+	display.Update(func() {
+		convTask.Status = ui.StatusRunning
+		convTask.MaxVisibleChildren = 10
+		convTask.AnchorFirstWhenPending = true
+		convTask.CollapseWhenInactive = true
+	})
 	display.Start()
 
 	months, emptyText := planMonths(ctx, client, loc, channel, startMs, endMs)
 	if emptyText != "" {
-		convTask.Status = ui.StatusSuccess
-		convTask.StatusText = emptyText
-		display.Redraw()
+		display.Update(func() {
+			convTask.Status = ui.StatusSuccess
+			convTask.StatusText = emptyText
+		})
 		return 0, nil
 	}
 
 	monthTasks := make([]*ui.Task, 0, len(months))
-	for _, m := range months {
-		monthTasks = append(monthTasks, convTask.AddChild(meta.DisplayName+" "+m))
-	}
+	display.Update(func() {
+		for _, m := range months {
+			monthTasks = append(monthTasks, convTask.AddChild(meta.DisplayName+" "+m))
+		}
+	})
 
 	flushedSet := map[string]bool{}
 	var currentMonth string
@@ -439,28 +445,30 @@ func archiveConversation(
 		if day != "" {
 			currentMonth = day[:7]
 		}
-		convTask.StatusText = fmt.Sprintf("%d posts", fetched)
 		if err := flushCompleted(); err != nil {
 			return err
 		}
-		setMonths()
-		display.Redraw()
+		display.Update(func() {
+			convTask.StatusText = fmt.Sprintf("%d posts", fetched)
+			setMonths()
+		})
 		return nil
 	}
 
 	postCount, err := archiveChannel(ctx, client, userCache, buffer, mdBuffer, startMs, endMs, loc, meta, channel, progress)
 	if err != nil {
-		convTask.Status = ui.StatusError
-		if ctx.Err() != nil {
-			convTask.StatusText = "interrupted"
-			for i, t := range monthTasks {
-				if months[i] == currentMonth {
-					t.Status = ui.StatusError
-					t.StatusText = "interrupted"
+		display.Update(func() {
+			convTask.Status = ui.StatusError
+			if ctx.Err() != nil {
+				convTask.StatusText = "interrupted"
+				for i, t := range monthTasks {
+					if months[i] == currentMonth {
+						t.Status = ui.StatusError
+						t.StatusText = "interrupted"
+					}
 				}
 			}
-		}
-		display.Redraw()
+		})
 		return postCount, err
 	}
 
@@ -468,15 +476,38 @@ func archiveConversation(
 	if err := flushCompleted(); err != nil {
 		return postCount, err
 	}
-	setMonths()
-	convTask.Status = ui.StatusSuccess
-	if postCount > 0 {
-		convTask.StatusText = "Ok"
-	} else {
-		convTask.StatusText = "no messages"
-	}
-	display.Redraw()
+	display.Update(func() {
+		setMonths()
+		convTask.Status = ui.StatusSuccess
+		if postCount > 0 {
+			convTask.StatusText = "Ok"
+		} else {
+			convTask.StatusText = "no messages"
+		}
+		convTask.CollapsedSummary = collapsedSummary(months, meta, buffer, flushedSet)
+	})
 	return postCount, nil
+}
+
+// collapsedSummary renders the "· N months" suffix of a completed conversation
+// task once it collapses: the number of months that were actually archived
+// (flushed). In dry-run mode nothing is flushed, so months with buffered data
+// are counted instead.
+func collapsedSummary(months []string, meta archive.ConversationMeta, buffer *archive.MonthBuffer, flushedSet map[string]bool) string {
+	archived := len(flushedSet)
+	if isDryRun() {
+		archived = 0
+		for _, m := range months {
+			if buffer.LineCount(archive.MonthKey(meta.TeamName, meta.DisplayName, m)) > 0 {
+				archived++
+			}
+		}
+	}
+	label := "months"
+	if archived == 1 {
+		label = "month"
+	}
+	return fmt.Sprintf("· %d %s", archived, label)
 }
 
 // monthStatusText renders the trailing status of a completed month task.

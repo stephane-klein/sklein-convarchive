@@ -35,6 +35,15 @@ type Task struct {
 	// for oldest-first task lists: processing starts at the first child, so
 	// the initial window should show it.
 	AnchorFirstWhenPending bool
+
+	// CollapseWhenInactive collapses the children to a single line whenever the
+	// task itself is neither running nor in error. Only the currently active
+	// task stays expanded, which keeps long task lists compact (listr2-style).
+	CollapseWhenInactive bool
+
+	// CollapsedSummary is appended to the task line when it is rendered
+	// collapsed (see CollapseWhenInactive), e.g. "· 8 months".
+	CollapsedSummary string
 }
 
 // AddChild appends a child task and returns it.

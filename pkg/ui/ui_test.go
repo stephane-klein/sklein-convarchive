@@ -234,9 +234,44 @@ func TestHiddenIndicatorSingular(t *testing.T) {
 	}
 }
 
+func TestRenderCollapsedWhenInactive(t *testing.T) {
+	root := &Task{Title: "team-nimbus/chan-delta", Status: StatusSuccess, StatusText: "Ok", CollapseWhenInactive: true, CollapsedSummary: "· 8 months"}
+	for i := 0; i < 8; i++ {
+		c := root.AddChild(monthKey(i))
+		c.Status = StatusSuccess
+		c.StatusText = "Ok (uploaded)"
+	}
+	lines := RenderAll([]*Task{root}, "⠋")
+	want := []string{"- [x] team-nimbus/chan-delta Ok · 8 months"}
+	if len(lines) != 1 || lines[0] != want[0] {
+		t.Fatalf("got %q, want %q", lines, want)
+	}
+}
+
+func TestRenderActiveTaskStaysExpanded(t *testing.T) {
+	root := &Task{Title: "team-nimbus/chan-delta", Status: StatusRunning, StatusText: "3200 posts", CollapseWhenInactive: true, MaxVisibleChildren: 10}
+	for i := 0; i < 8; i++ {
+		root.AddChild(monthKey(i))
+	}
+	lines := RenderAll([]*Task{root}, "⠋")
+	if len(lines) != 9 { // parent + 8 children
+		t.Fatalf("got %d lines, want 9: %q", len(lines), lines)
+	}
+}
+
+func TestRenderCollapsedWithoutSummary(t *testing.T) {
+	root := &Task{Title: "c", Status: StatusSuccess, CollapseWhenInactive: true}
+	root.AddChild("x")
+	lines := RenderAll([]*Task{root}, "⠋")
+	if len(lines) != 1 || lines[0] != "- [x] c" {
+		t.Fatalf("got %q", lines)
+	}
+}
+
 // vt is a minimal virtual terminal that applies the ANSI sequences emitted by
-// renderTTY (\x1b[nA move up, \x1b[2K clear line, \n newline) so tests can
-// assert the final on-screen lines, not just the raw byte stream.
+// renderTTY (\x1b[nA cursor up, \x1b[nE cursor next line, \x1b[nF cursor
+// preceding line, \x1b[2K clear line, \n newline) so tests can assert the
+// final on-screen lines, not just the raw byte stream.
 type vt struct {
 	screen []string
 	row    int
@@ -266,11 +301,13 @@ func (v *vt) write(s string) {
 			n, _ = strconv.Atoi(rest[:j])
 		}
 		switch rest[j] {
-		case 'A':
+		case 'A', 'F':
 			v.row -= n
 			if v.row < 0 {
 				v.row = 0
 			}
+		case 'E':
+			v.row += n
 		case 'K':
 			v.ensure(v.row)
 			v.screen[v.row] = ""
@@ -359,6 +396,73 @@ func TestRenderTTYNoGhostAfterShrink(t *testing.T) {
 	for i := len(want); i < len(v.screen); i++ {
 		if v.screen[i] != "" {
 			t.Errorf("stale line at row %d: %q", i, v.screen[i])
+		}
+	}
+}
+
+func TestRenderTTYGrowAfterCollapse(t *testing.T) {
+	v := &vt{}
+	d := &Display{w: vtWriter{v}, tty: true, sp: newSpinner(), lastStatus: make(map[*Task]Status)}
+
+	mkConv := func(title string, n int) *Task {
+		conv := &Task{Title: title, Status: StatusRunning, MaxVisibleChildren: 10, CollapseWhenInactive: true}
+		for i := 0; i < n; i++ {
+			c := conv.AddChild(title + "-" + string(rune('a'+i)))
+			c.Status = StatusSuccess
+			c.StatusText = "Ok (uploaded)"
+		}
+		conv.StatusText = "3200 posts"
+		d.roots = append(d.roots, conv)
+		d.Redraw()
+		return conv
+	}
+	finish := func(conv *Task) {
+		conv.Status = StatusSuccess
+		conv.StatusText = "Ok"
+		conv.CollapsedSummary = "· 12 months"
+		d.Redraw()
+	}
+
+	c1 := mkConv("team-nimbus/chan-delta", 12)
+	finish(c1)
+	c2 := mkConv("team-nimbus/chan-gamma", 12)
+	finish(c2)
+	c3 := mkConv("team-nimbus/chan-zeta", 12)
+	finish(c3)
+	mkConv("team-nimbus/chan-eta", 12) // active, expanded
+
+	want := RenderAll(d.roots, d.sp.frame())
+	// 3 collapsed + 1 expanded (parent + hidden indicator + 10 window children).
+	if len(want) != 15 {
+		t.Fatalf("expected 15 lines, got %d: %q", len(want), want)
+	}
+	for i, wl := range want {
+		if got := v.screen[i]; got != wl {
+			t.Errorf("screen line %d = %q, want %q", i, got, wl)
+		}
+	}
+}
+
+func TestRenderTTYRootWindow(t *testing.T) {
+	v := &vt{}
+	d := &Display{w: vtWriter{v}, tty: true, sp: newSpinner(), lastStatus: make(map[*Task]Status), MaxVisibleRoots: 3}
+	for i := 0; i < 5; i++ {
+		r := d.Root(fmt.Sprintf("conv-%d", i))
+		r.Status = StatusSuccess
+		r.StatusText = "Ok"
+	}
+	d.Redraw()
+	lines := d.renderLines()
+	// 5 roots, 3 visible → 1 indicator + 3 roots.
+	if len(lines) != 4 {
+		t.Fatalf("got %d lines, want 4: %q", len(lines), lines)
+	}
+	if lines[0] != "- … 2 hidden conversations …" {
+		t.Errorf("indicator = %q", lines[0])
+	}
+	for i, wl := range lines {
+		if v.screen[i] != wl {
+			t.Errorf("screen line %d = %q, want %q", i, v.screen[i], wl)
 		}
 	}
 }

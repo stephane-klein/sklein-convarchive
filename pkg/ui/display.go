@@ -19,21 +19,29 @@ type Display struct {
 	roots []*Task
 	sp    *spinner
 
-	started    bool
-	stopped    bool
-	rendered   bool
-	lastLines  int
-	lastStatus map[*Task]Status
+	// MaxVisibleRoots caps how many top-level tasks are rendered at once.
+	// Since tasks are appended as they are processed, the most recent ones
+	// (including the active task) stay visible and the older ones are hidden
+	// behind a "N hidden conversations" indicator. Zero means no limit.
+	MaxVisibleRoots int
+
+	started     bool
+	stopped     bool
+	rendered    bool
+	lastLines   int
+	lastContent []string
+	lastStatus  map[*Task]Status
 }
 
 // New returns a Display writing to w. Whether w is a terminal is detected
 // here, once, via os.ModeCharDevice.
 func New(w io.Writer) *Display {
 	return &Display{
-		w:          w,
-		tty:        isTTY(w),
-		sp:         newSpinner(),
-		lastStatus: make(map[*Task]Status),
+		w:               w,
+		tty:             isTTY(w),
+		sp:              newSpinner(),
+		MaxVisibleRoots: 15,
+		lastStatus:      make(map[*Task]Status),
 	}
 }
 
@@ -78,11 +86,42 @@ func (d *Display) Start() {
 func (d *Display) Redraw() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.renderLocked()
+}
+
+// Update applies fn to the task tree and re-renders it, holding the display
+// lock for both so a concurrent spinner render never observes a half-mutated
+// task. fn must only mutate in-memory state; slow work (network, disk) must
+// stay outside of it.
+func (d *Display) Update(fn func()) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	fn()
+	d.renderLocked()
+}
+
+func (d *Display) renderLocked() {
 	if d.tty {
-		d.renderTTY(RenderAll(d.roots, d.sp.frame()))
+		d.renderTTY(d.renderLines())
 		return
 	}
 	d.renderVerbose()
+}
+
+// renderLines builds the display lines for the current task tree, applying
+// the top-level window (only the most recent MaxVisibleRoots tasks are shown).
+func (d *Display) renderLines() []string {
+	roots := d.roots
+	hidden := 0
+	if d.MaxVisibleRoots > 0 && len(roots) > d.MaxVisibleRoots {
+		hidden = len(roots) - d.MaxVisibleRoots
+		roots = roots[len(roots)-d.MaxVisibleRoots:]
+	}
+	lines := RenderAll(roots, d.sp.frame())
+	if hidden > 0 {
+		lines = append([]string{fmt.Sprintf("- … %d hidden conversations …", hidden)}, lines...)
+	}
+	return lines
 }
 
 // Stop performs a final render, stops the spinner, and leaves the cursor on a
@@ -103,25 +142,69 @@ func (d *Display) Stop() {
 	}
 }
 
+// renderTTY redraws the task list incrementally: only the lines whose content
+// changed are rewritten, so a spinner tick that changes nothing emits nothing
+// and long task lists stay cheap to refresh. The cursor is parked at the end
+// of the block after every render so the next one finds the top by moving up
+// exactly lastLines.
 func (d *Display) renderTTY(lines []string) {
-	if d.rendered && d.lastLines > 0 {
-		fmt.Fprintf(d.w, "\x1b[%dA", d.lastLines)
+	if !d.rendered {
+		for _, l := range lines {
+			fmt.Fprintf(d.w, "\x1b[2K%s\n", l)
+		}
+		d.lastContent = append([]string(nil), lines...)
+		d.rendered = true
+		d.lastLines = len(lines)
+		return
 	}
-	for _, l := range lines {
-		fmt.Fprintf(d.w, "\x1b[2K%s\n", l)
+
+	if equalStrings(lines, d.lastContent) {
+		// Nothing changed: leave the cursor where it is (end of block).
+		return
 	}
-	for i := len(lines); i < d.lastLines; i++ {
-		fmt.Fprint(d.w, "\x1b[2K\n")
+
+	// Move back to the top of the block.
+	fmt.Fprintf(d.w, "\x1b[%dA", d.lastLines)
+
+	// Rewrite the changed and new lines.
+	at := 0
+	for i, l := range lines {
+		if i >= len(d.lastContent) || lines[i] != d.lastContent[i] {
+			if i > at {
+				fmt.Fprintf(d.w, "\x1b[%dE", i-at)
+			}
+			fmt.Fprintf(d.w, "\x1b[2K%s", l)
+			at = i
+		}
 	}
-	// When the block shrank, the clear loop left the cursor at the bottom of
-	// the previous block. Park it at the end of the new block so the next
-	// render moves up exactly lastLines and finds the top of the block again
-	// — otherwise the cursor drifts down and stale lines survive on screen.
-	if len(lines) < d.lastLines {
-		fmt.Fprintf(d.w, "\x1b[%dA", d.lastLines-len(lines))
+
+	// Clear the lines that were removed when the block shrank.
+	if len(lines) < len(d.lastContent) {
+		if n := len(lines) - at; n > 0 {
+			fmt.Fprintf(d.w, "\x1b[%dE", n)
+		}
+		for i := len(lines); i < len(d.lastContent); i++ {
+			fmt.Fprint(d.w, "\x1b[2K\n")
+		}
+		fmt.Fprintf(d.w, "\x1b[%dF", len(d.lastContent)-len(lines))
+	} else if at < len(lines) {
+		fmt.Fprintf(d.w, "\x1b[%dE", len(lines)-at)
 	}
-	d.rendered = true
+
+	d.lastContent = append([]string(nil), lines...)
 	d.lastLines = len(lines)
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func (d *Display) renderVerbose() {
