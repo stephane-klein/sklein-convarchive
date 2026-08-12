@@ -18,6 +18,25 @@ A centralized archiving system for multi-source conversations (Mattermost, Signa
 - Encrypt every object before upload with [age](https://age-encryption.org/) — the object storage never sees plaintext
 - Compress every object with zstd by default (`.zst` suffix) to save storage — disable with `--no-compress`
 
+## AI-Assisted Development
+
+This project was developed using:
+
+- [OpenCode](https://opencode.ai) CLI — coding assistant workflow (not vibe coding)
+- Models: DeepSeek v4 Flash (OpenCode Go)
+
+## Tech Stack
+
+- Language: Go
+- CLI: [Cobra](https://github.com/spf13/cobra) + [Viper](https://github.com/spf13/viper)
+- Mattermost client: minimal HTTP client built on the Go standard library
+- Object Storage client: [minio-go](https://github.com/minio/minio-go)
+- Encryption: [age](https://age-encryption.org/) (`filippo.io/age`) — client-side encryption of every object before upload
+- Compression: [klauspost/compress](https://github.com/klauspost/compress) (zstd) — every object is compressed before upload
+- Terminal UI: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Bubbles](https://github.com/charmbracelet/bubbles) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) (charmbracelet) — powers `storage browse`
+- Local dev object storage: [RustFS](https://github.com/rustfs/rustfs) via Podman Compose (MinIO community edition was archived in February 2026)
+- Tooling: [mise](https://mise.jdx.dev)
+
 ## Installation
 
 Binaries are published for every release as GitHub Release assets:
@@ -83,25 +102,6 @@ $ podman run --rm \
 ```
 
 The image ships with the IANA timezone database and CA certificates, so `--timezone` and HTTPS work out of the box.
-
-## AI-Assisted Development
-
-This project was developed using:
-
-- [OpenCode](https://opencode.ai) CLI — coding assistant workflow (not vibe coding)
-- Models: DeepSeek v4 Flash (OpenCode Go)
-
-## Tech Stack
-
-- Language: Go
-- CLI: [Cobra](https://github.com/spf13/cobra) + [Viper](https://github.com/spf13/viper)
-- Mattermost client: minimal HTTP client built on the Go standard library
-- Object Storage client: [minio-go](https://github.com/minio/minio-go)
-- Encryption: [age](https://age-encryption.org/) (`filippo.io/age`) — client-side encryption of every object before upload
-- Compression: [klauspost/compress](https://github.com/klauspost/compress) (zstd) — every object is compressed before upload
-- Terminal UI: [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Bubbles](https://github.com/charmbracelet/bubbles) + [Lip Gloss](https://github.com/charmbracelet/lipgloss) (charmbracelet) — powers `storage browse`
-- Local dev object storage: [RustFS](https://github.com/rustfs/rustfs) via Podman Compose (MinIO community edition was archived in February 2026)
-- Tooling: [mise](https://mise.jdx.dev)
 
 ## Prerequisites
 
