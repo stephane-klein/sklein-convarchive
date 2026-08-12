@@ -28,12 +28,17 @@ type Object struct {
 //
 //	<layer>/<source>/<team>/<conversation>/<year>/<month>.<ext>[.zst][.age]
 //
+// or of the AI export thread layout, which has no conversation segment:
+//
+//	<layer>/<source>/<account>/<year>/<datetime>.<ext>[.zst][.age]
+//
 // where <ext> is ".jsonl" for the jsonl layer and ".md" for the markdown layer.
 // The ".age" and ".zst" suffixes are optional and set the corresponding flags.
+// The Conversation field is empty for the thread layout.
 func ParseObjectKey(key string) (*Object, error) {
 	parts := strings.Split(key, "/")
-	if len(parts) != 6 {
-		return nil, fmt.Errorf("invalid object key %q: expected 6 path segments", key)
+	if len(parts) != 6 && len(parts) != 5 {
+		return nil, fmt.Errorf("invalid object key %q: expected 5 or 6 path segments", key)
 	}
 
 	layer := parts[0]
@@ -41,22 +46,26 @@ func ParseObjectKey(key string) (*Object, error) {
 		return nil, fmt.Errorf("invalid object key %q: unsupported layer %q", key, layer)
 	}
 
-	month, compressed, encrypted, err := parseFilename(layer, parts[5])
+	month, compressed, encrypted, err := parseFilename(layer, parts[len(parts)-1])
 	if err != nil {
 		return nil, fmt.Errorf("invalid object key %q: %w", key, err)
 	}
 
-	return &Object{
-		Layer:        layer,
-		Source:       parts[1],
-		Team:         parts[2],
-		Conversation: parts[3],
-		Year:         parts[4],
-		Month:        month,
-		Compressed:   compressed,
-		Encrypted:    encrypted,
-		Key:          key,
-	}, nil
+	obj := &Object{
+		Layer:      layer,
+		Source:     parts[1],
+		Team:       parts[2],
+		Year:       parts[3],
+		Month:      month,
+		Compressed: compressed,
+		Encrypted:  encrypted,
+		Key:        key,
+	}
+	if len(parts) == 6 {
+		obj.Conversation = parts[3]
+		obj.Year = parts[4]
+	}
+	return obj, nil
 }
 
 // parseFilename strips the optional ".age" and ".zst" suffixes and the layer

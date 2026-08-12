@@ -46,8 +46,16 @@ func BuildTree(keys []string) (*Tree, error) {
 		layer := findOrCreate(root, KindLayer, obj.Layer, obj.Layer+"/")
 		source := findOrCreate(layer, KindSource, obj.Source, layer.Prefix+obj.Source+"/")
 		team := findOrCreate(source, KindTeam, obj.Team, source.Prefix+obj.Team+"/")
-		conv := findOrCreate(team, KindConversation, obj.Conversation, team.Prefix+obj.Conversation+"/")
-		year := findOrCreate(conv, KindYear, obj.Year, conv.Prefix+obj.Year+"/")
+
+		// AI export threads have no conversation segment: the year sits
+		// directly under the team.
+		var year *Node
+		if obj.Conversation != "" {
+			conv := findOrCreate(team, KindConversation, obj.Conversation, team.Prefix+obj.Conversation+"/")
+			year = findOrCreate(conv, KindYear, obj.Year, conv.Prefix+obj.Year+"/")
+		} else {
+			year = findOrCreate(team, KindYear, obj.Year, team.Prefix+obj.Year+"/")
+		}
 
 		if findChild(year, obj.Month) == nil {
 			year.Children = append(year.Children, &Node{

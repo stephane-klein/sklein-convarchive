@@ -10,6 +10,8 @@ PROJECT_NAME = "sklein-convarchive"
 INSTANCE_ID = "{{ cwd | hash(algorithm='sha256', len=12) }}"
 COMPOSE_PROJECT_NAME = "{{ env.PROJECT_NAME }}_{{ env.INSTANCE_ID }}"
 
+SKLEIN_CONVARCHIVE_OWNER="stephane"
+
 # rclone remote "rustfs" configured from the S3 credentials in .secret
 RCLONE_CONFIG_RUSTFS_TYPE = "s3"
 RCLONE_CONFIG_RUSTFS_PROVIDER = "Other"
@@ -22,6 +24,14 @@ RCLONE_LOG_LEVEL = "ERROR"
 [tasks.build]
 run = "go build -ldflags \"-X main.version=$(git describe --tags --always --dirty | sed 's/^v//')\" -o sklein-convarchive ./cmd"
 description = "Build the sklein-convarchive CLI application"
+
+[tasks.test]
+run = "go test ./..."
+description = "Run all Go unit tests"
+
+[tasks.test-race]
+run = "go test -race ./..."
+description = "Run all Go unit tests with the race detector (slower, requires cgo)"
 
 [tasks.up]
 run = "scripts/up.sh"

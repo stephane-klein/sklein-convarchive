@@ -79,6 +79,45 @@ func TestBuildTree(t *testing.T) {
 	}
 }
 
+func TestBuildTreeThreadLayout(t *testing.T) {
+	keys := []string{
+		"jsonl/claude/account-a/2024/2024-03-14_101500.jsonl",
+		"jsonl/claude/account-a/2024/2024-03-14_093200.jsonl.zst",
+		"markdown/claude/account-a/2024/2024-03-14_101500.md.zst",
+	}
+
+	tree, err := BuildTree(keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	jsonl := tree.Root.Children[0]
+	claude := jsonl.Children[0]
+	if claude.Slug != "claude" {
+		t.Fatalf("source = %q, want claude", claude.Slug)
+	}
+	account := claude.Children[0]
+	if account.Slug != "account-a" {
+		t.Fatalf("team = %q, want account-a", account.Slug)
+	}
+	year := account.Children[0]
+	if year.Slug != "2024" {
+		t.Fatalf("year = %q, want 2024", year.Slug)
+	}
+	if len(year.Children) != 2 {
+		t.Fatalf("threads = %d, want 2 (deduplicated leaves)", len(year.Children))
+	}
+	if year.Children[0].Slug != "2024-03-14_093200" {
+		t.Errorf("thread leaf[0] = %q, want 2024-03-14_093200", year.Children[0].Slug)
+	}
+	if year.Children[0].Object.Compressed != true {
+		t.Errorf("thread leaf[0] compressed = false, want true")
+	}
+	if year.Children[1].Slug != "2024-03-14_101500" {
+		t.Errorf("thread leaf[1] = %q, want 2024-03-14_101500", year.Children[1].Slug)
+	}
+}
+
 func TestBuildTreeIgnoresNonObjectKeys(t *testing.T) {
 	keys := []string{
 		"jsonl/mattermost/-/chan-alpha/2017/2017-08.jsonl",

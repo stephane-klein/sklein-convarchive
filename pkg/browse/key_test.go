@@ -43,6 +43,24 @@ func TestParseObjectKey(t *testing.T) {
 				Key: "jsonl/mattermost/team-quartz/chan-beta/2019/2019-01.jsonl.zst.age",
 			},
 		},
+		{
+			name: "ai export thread (no conversation segment)",
+			key:  "jsonl/claude/account-a/2024/2024-03-14_101500.jsonl",
+			want: Object{
+				Layer: "jsonl", Source: "claude", Team: "account-a", Conversation: "",
+				Year: "2024", Month: "2024-03-14_101500",
+				Key: "jsonl/claude/account-a/2024/2024-03-14_101500.jsonl",
+			},
+		},
+		{
+			name: "ai export thread markdown compressed and encrypted",
+			key:  "markdown/chatgpt/default/2024/2024-01-12_164500.md.zst.age",
+			want: Object{
+				Layer: "markdown", Source: "chatgpt", Team: "default", Conversation: "",
+				Year: "2024", Month: "2024-01-12_164500", Compressed: true, Encrypted: true,
+				Key: "markdown/chatgpt/default/2024/2024-01-12_164500.md.zst.age",
+			},
+		},
 	}
 
 	for _, tt := range tests {

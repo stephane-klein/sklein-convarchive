@@ -6,20 +6,20 @@ A centralized archiving system for multi-source conversations (Mattermost, Signa
 
 ## Source Support
 
-Currently **only Mattermost** is implemented. The other sources are planned:
-
-- [x] Mattermost — fully implemented
+- [x] Mattermost — fully implemented (live API)
+- [x] Claude.ai — import of exports produced by the [claude-chatgpt-backup-extension](https://github.com/stephane-klein/claude-chatgpt-backup-extension) Firefox extension
+- [x] ChatGPT — import of exports produced by the same [claude-chatgpt-backup-extension](https://github.com/stephane-klein/claude-chatgpt-backup-extension) Firefox extension
 - [ ] Signal — planned
 - [ ] OpenCode — planned
-- [ ] Claude.ai — planned
 
 ## Features
 
 - Archive all your [Mattermost](https://github.com/mattermost/mattermost) conversations — channels, private groups, and 1-1 direct messages — into Object Storage (S3-compatible)
+- Import your Claude.ai and ChatGPT conversations exported by the [claude-chatgpt-backup-extension](https://github.com/stephane-klein/claude-chatgpt-backup-extension) Firefox extension, archived as one JSONL + one Markdown object per thread
 - Store them in a durable, open format (JSONL) that stays readable forever and is ready for AI/analysis later
 - Works with the storage you may already use: AWS S3, Backblaze B2, Scaleway, MinIO, RustFS, etc.
-- Choose exactly what to archive: a specific conversation, one month, or a whole year
-- Get a clean, readable version of every conversation as Markdown, one file per conversation per month — perfect for browsing or sharing
+- Choose exactly what to archive: a specific conversation, one month, or a whole year (Mattermost), or filter your Claude.ai/ChatGPT exports by month or year with `--period`
+- Get a clean, readable version of every conversation as Markdown — one file per conversation per month for Mattermost, one file per thread for Claude.ai/ChatGPT exports — perfect for browsing or sharing
 - Browse your archive interactively with `storage browse`: an in-terminal TUI that navigates the JSONL and Markdown layers by source, team, conversation, and month, reading straight from the object storage
 - Keep your local time: timestamps are shown in your timezone (default Europe/Paris), with automatic handling of daylight saving time
 - Test that everything works before archiving: check your Mattermost access and your object storage connection in one command
@@ -205,6 +205,28 @@ $ ./sklein-convarchive mattermost archive --conversation <id>                   
 - `--period` accepts `YYYY-MM` (month) or `YYYY` (year)
 - `--timezone`: IANA timezone used for timestamps in the render and for day/month boundaries (default `Europe/Paris`; the JSONL stores the local offset, the `raw` field keeps the absolute epoch)
 
+### Import Claude.ai and ChatGPT conversation exports
+
+The [claude-chatgpt-backup-extension](https://github.com/stephane-klein/claude-chatgpt-backup-extension) Firefox extension downloads Claude.ai and ChatGPT conversations as JSON files. One or more files are imported with the `claude-chatgpt-backup-extension-export archive` command, which produces **one JSONL object and one Markdown object per thread**, named after the thread creation datetime:
+
+```bash
+$ ./sklein-convarchive claude-chatgpt-backup-extension-export archive \
+  --file claude_all_conversations.json \
+  --dry-run
+
+$ ./sklein-convarchive claude-chatgpt-backup-extension-export archive \
+  --file claude_all_conversations.json \
+  --file chatgpt_all_conversations.json
+```
+
+- `--file <path>` (repeatable, comma-separated): one or more export files to import
+- The source format is auto-detected (`--source claude|chatgpt|auto`, default `auto`)
+- `--account <label>`: account/workspace label used in the object path, e.g. `jsonl/claude/account-demo/2024/2024-03-14_101500.jsonl` (default: derived from each export filename suffix, e.g. `..._claude_all_conversations_account_demo.json` → `account-demo`; with several files, set `--account` to apply it to all of them)
+- `--period`: optional filter (`YYYY-MM` or `YYYY`), applied to every file
+- `--owner` (global flag, default `stephane`): identity attributed to `human`/`user` messages; configurable via `SKLEIN_CONVARCHIVE_OWNER` or the `owner` key of the config file
+
+The exported files are always passed explicitly on the command line: the import-specific options are not configurable via a configuration file or environment variables.
+
 ### Browse the archive with the terminal UI
 
 `storage browse` opens an interactive TUI to explore the archive directly in your terminal. It lists the object storage once at startup, then lets you drill down from layer (JSONL or Markdown) to source, team, conversation, year, and month.
@@ -278,6 +300,10 @@ The `rustfs` remote is already connected to the object storage through environme
 A local `.sklein-convarchive.toml` file can also be used (see `.sklein-convarchive.toml.example`):
 
 ```toml
+# Identity attributed to human/user messages of AI conversation exports
+# (claude-chatgpt-backup-extension-export). Global setting.
+owner = "stephane"
+
 [mattermost]
 server_url = "https://chat.example.com"
 token = "..."
@@ -310,12 +336,15 @@ Source-specific flags (Mattermost: `--server-url`, `--token`, `--username`, `--p
 conversations/
   jsonl/
     mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.zst
+    claude/account-demo/2024/2024-03-14_101500.jsonl.zst
+    chatgpt/default/2024/2024-01-12_164500.jsonl.zst
   markdown/
     mattermost/team-nimbus/chan-gamma/2026/2026-08.md.zst
+    claude/account-demo/2024/2024-03-14_101500.md.zst
 ```
 
-The `jsonl/` layer is the raw, normalized archive (source of truth), one file per conversation per month.
-The `markdown/` layer is a human-readable rendering, generated in parallel, one file per conversation per month, in an IRC-like format (aligned username column, text wrapping at 100 chars, messages grouped by day, threads indented under their root).
+The `jsonl/` layer is the raw, normalized archive (source of truth), one file per conversation per month for Mattermost, and one file per thread for the Claude.ai/ChatGPT exports (named after the thread creation datetime).
+The `markdown/` layer is a human-readable rendering, generated in parallel, one file per conversation per month for Mattermost (one per thread for the AI exports), in an IRC-like format (aligned username column, text wrapping at 100 chars, messages grouped by day, threads indented under their root).
 
 Objects are compressed with zstd by default (`.zst` suffix); disable with `--no-compress`. With `--encrypt`, every object is age-encrypted and uploaded with a `.age` suffix and `application/octet-stream` content type, applied after compression (`.zst.age`).
 

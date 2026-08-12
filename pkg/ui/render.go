@@ -62,13 +62,13 @@ func renderNode(t *Task, depth int, frame string) []string {
 	if t.MaxVisibleChildren > 0 && len(t.children) > t.MaxVisibleChildren {
 		start, end := visibleWindow(t.children, t.MaxVisibleChildren, t.AnchorFirstWhenPending)
 		if start > 0 {
-			lines = append(lines, hiddenIndicator(indent, start))
+			lines = append(lines, hiddenIndicator(indent, start, t.HiddenChildrenLabel))
 		}
 		for _, c := range t.children[start:end] {
 			lines = append(lines, renderNode(c, depth+1, frame)...)
 		}
 		if end < len(t.children) {
-			lines = append(lines, hiddenIndicator(indent, len(t.children)-end))
+			lines = append(lines, hiddenIndicator(indent, len(t.children)-end, t.HiddenChildrenLabel))
 		}
 		return lines
 	}
@@ -123,10 +123,16 @@ func taskActive(t *Task) bool {
 
 // hiddenIndicator renders the "… N hidden children …" line for a parent task
 // at the given indentation. The line does not carry a task status symbol.
-func hiddenIndicator(indent string, n int) string {
-	label := "months"
-	if n == 1 {
+// An empty label uses the "month"/"months" wording of the Mattermost archive
+// display.
+func hiddenIndicator(indent string, n int, label string) string {
+	if label == "" {
 		label = "month"
+		if n > 1 {
+			label = "months"
+		}
+	} else if n > 1 {
+		label += "s"
 	}
 	return fmt.Sprintf("%s  - … %d hidden %s …", indent, n, label)
 }

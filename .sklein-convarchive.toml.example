@@ -1,6 +1,11 @@
 # sklein-convarchive local configuration
 # Copy to .sklein-convarchive.toml and adjust values.
 
+# Identity attributed to human/user messages of AI conversation exports
+# (claude-chatgpt-backup-extension-export). Global setting, also available as
+# the SKLEIN_CONVARCHIVE_OWNER environment variable or the --owner flag.
+owner = "stephane"
+
 [mattermost]
 server_url = "https://mattermost.example.com"
 # token = ""

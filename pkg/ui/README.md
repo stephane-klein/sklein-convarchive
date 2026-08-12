@@ -45,7 +45,9 @@ stays here, small and focused, easy to read and to adapt.
   success, error). A task can cap its rendered children with
   `MaxVisibleChildren`: longer subtrees render as a sliding window of that
   size around the active child, with "N hidden children" indicators above and
-  below — used to keep long month lists compact.
+  below — used to keep long month lists compact. `HiddenChildrenLabel` names
+  the hidden children in that indicator (e.g. "threads"); an empty label uses
+  the "month"/"months" wording of the Mattermost archive display.
 - `render.go` — pure rendering of a task tree into display lines
   (`RenderAll`), unit-testable without a terminal.
 - `spinner.go` — the braille frame set and its ticker.

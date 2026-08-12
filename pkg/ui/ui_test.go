@@ -226,10 +226,19 @@ func TestRenderWindowedNoLimit(t *testing.T) {
 }
 
 func TestHiddenIndicatorSingular(t *testing.T) {
-	if got := hiddenIndicator("", 1); got != "  - … 1 hidden month …" {
+	if got := hiddenIndicator("", 1, ""); got != "  - … 1 hidden month …" {
 		t.Errorf("got %q", got)
 	}
-	if got := hiddenIndicator("  ", 3); got != "    - … 3 hidden months …" {
+	if got := hiddenIndicator("  ", 3, ""); got != "    - … 3 hidden months …" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestHiddenIndicatorCustomLabel(t *testing.T) {
+	if got := hiddenIndicator("", 1, "thread"); got != "  - … 1 hidden thread …" {
+		t.Errorf("got %q", got)
+	}
+	if got := hiddenIndicator("  ", 3, "thread"); got != "    - … 3 hidden threads …" {
 		t.Errorf("got %q", got)
 	}
 }

@@ -13,6 +13,7 @@ import (
 // ConversationMeta carries the context of a conversation needed to render the
 // Markdown title and the object storage path.
 type ConversationMeta struct {
+	Source       string
 	TeamName     string
 	Type         string   // O (public), P (private), D (direct), G (group)
 	DisplayName  string   // channel display name, or "@user, @user" for D/G
@@ -83,13 +84,21 @@ func (b *MarkdownBuffer) Render(key string) ([]byte, error) {
 	entries := sortedEntries(group.entries)
 	month := monthFromEntries(entries)
 
+	var buf bytes.Buffer
+	renderEntries(&buf, entries, month+" - "+conversationTitle(group.meta))
+	return buf.Bytes(), nil
+}
+
+// renderEntries writes the IRC-like body shared by the monthly and the
+// per-thread Markdown renderers: a title, then the entries grouped by day,
+// with blank lines between author turns.
+func renderEntries(buf *bytes.Buffer, entries []*Entry, title string) {
 	usernameWidth := maxUsernameWidth(entries)
 
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "# %s - %s\n\n", month, conversationTitle(group.meta))
+	fmt.Fprintf(buf, "# %s\n\n", title)
 
-	// Group the month's entries into threads: each root followed by its
-	// replies (chronologically), then orphan replies.
+	// Group the entries into threads: each root followed by its replies
+	// (chronologically), then orphan replies.
 	units := buildThreadUnits(entries)
 
 	prevAuthor := ""
@@ -103,7 +112,7 @@ func (b *MarkdownBuffer) Render(key string) ([]byte, error) {
 			if !first {
 				buf.WriteString("\n")
 			}
-			fmt.Fprintf(&buf, "## %s\n\n", day)
+			fmt.Fprintf(buf, "## %s\n\n", day)
 			currentDay = day
 			prevAuthor = ""
 			prevTime = time.Time{}
@@ -111,9 +120,6 @@ func (b *MarkdownBuffer) Render(key string) ([]byte, error) {
 
 		if u.placeholder {
 			// Orphan reply: its root is outside the archived period.
-			if !first && currentDay != "" {
-				// blank separation handled below via turn rule
-			}
 			buf.WriteString("- [racine non archivée]\n")
 			prevAuthor = ""
 			prevTime = time.Time{}
@@ -139,8 +145,6 @@ func (b *MarkdownBuffer) Render(key string) ([]byte, error) {
 		prevTime = ts
 		first = false
 	}
-
-	return buf.Bytes(), nil
 }
 
 // FlushKey renders and uploads a single conversation+month as one Markdown
@@ -206,6 +210,14 @@ func conversationTitle(meta ConversationMeta) string {
 		display := meta.DisplayName
 		if display == "" {
 			display = meta.ChannelName
+		}
+		if meta.Source == "claude" || meta.Source == "chatgpt" {
+			// AI conversation exports have no channel notion; the title is the
+			// conversation name itself.
+			if display == "" {
+				return "Conversation"
+			}
+			return display
 		}
 		return "Canal " + display
 	}

@@ -3,3 +3,5 @@ dist/
 .secret
 .sklein-convarchive.toml
 age.key
+data-sources/
+scratch.txt

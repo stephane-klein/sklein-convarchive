@@ -38,6 +38,7 @@ func init() {
 	rootCmd.PersistentFlags().Bool("encrypt", false, "Encrypt objects with age before uploading them")
 	rootCmd.PersistentFlags().String("age-recipient", "", "Age X25519 recipient public key (age1...) used to encrypt objects")
 	rootCmd.PersistentFlags().Bool("no-compress", false, "Disable zstd compression (enabled by default)")
+	rootCmd.PersistentFlags().String("owner", "stephane", "Identity attributed to human/user messages of AI conversation exports")
 
 	viper.BindPFlag("s3.endpoint", rootCmd.PersistentFlags().Lookup("s3-endpoint"))
 	viper.BindPFlag("s3.access_key", rootCmd.PersistentFlags().Lookup("s3-access-key"))
@@ -49,6 +50,7 @@ func init() {
 	viper.BindPFlag("age.encrypt", rootCmd.PersistentFlags().Lookup("encrypt"))
 	viper.BindPFlag("age.recipient", rootCmd.PersistentFlags().Lookup("age-recipient"))
 	viper.BindPFlag("no_compress", rootCmd.PersistentFlags().Lookup("no-compress"))
+	viper.BindPFlag("owner", rootCmd.PersistentFlags().Lookup("owner"))
 
 	viper.BindEnv("s3.endpoint", "S3_ENDPOINT")
 	viper.BindEnv("s3.access_key", "S3_ACCESS_KEY")
@@ -59,12 +61,14 @@ func init() {
 	viper.BindEnv("age.encrypt", "SKLEIN_CONVARCHIVE_ENCRYPT")
 	viper.BindEnv("age.recipient", "AGE_RECIPIENT")
 	viper.BindEnv("no_compress", "SKLEIN_CONVARCHIVE_NO_COMPRESS")
+	viper.BindEnv("owner", "SKLEIN_CONVARCHIVE_OWNER")
 }
 
 func initConfig() {
 	viper.SetDefault("s3.endpoint", "http://localhost:9000")
 	viper.SetDefault("s3.bucket", "conversations")
 	viper.SetDefault("no_compress", false)
+	viper.SetDefault("owner", "stephane")
 
 	homeDir, err := os.UserHomeDir()
 	if err == nil {

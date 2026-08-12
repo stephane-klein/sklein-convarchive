@@ -44,6 +44,11 @@ type Task struct {
 	// CollapsedSummary is appended to the task line when it is rendered
 	// collapsed (see CollapseWhenInactive), e.g. "· 8 months".
 	CollapsedSummary string
+
+	// HiddenChildrenLabel names the kind of children hidden behind a window
+	// indicator, e.g. "threads" for "… 5 hidden threads …". Empty means the
+	// generic "month"/"months" wording, matching the Mattermost archive display.
+	HiddenChildrenLabel string
 }
 
 // AddChild appends a child task and returns it.
