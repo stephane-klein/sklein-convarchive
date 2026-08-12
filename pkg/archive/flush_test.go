@@ -7,11 +7,16 @@ import (
 )
 
 type fakePutter struct {
-	uploads map[string][]byte
+	uploads      map[string][]byte
+	contentTypes map[string]string
 }
 
-func (f *fakePutter) Put(_ context.Context, key string, data []byte, _ string) error {
+func (f *fakePutter) Put(_ context.Context, key string, data []byte, contentType string) error {
 	f.uploads[key] = append([]byte(nil), data...)
+	if f.contentTypes == nil {
+		f.contentTypes = map[string]string{}
+	}
+	f.contentTypes[key] = contentType
 	return nil
 }
 

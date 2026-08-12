@@ -1,6 +1,7 @@
 [tools]
 go = "1.26.1"
 rclone = "1.75.0"
+"github:facebook/zstd" = "1.5.7"
 
 [env]
 _.file = ".secret"

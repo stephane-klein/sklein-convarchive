@@ -37,6 +37,7 @@ func init() {
 	rootCmd.PersistentFlags().String("timezone", "Europe/Paris", "Timezone used for timestamps in the render (IANA name)")
 	rootCmd.PersistentFlags().Bool("encrypt", false, "Encrypt objects with age before uploading them")
 	rootCmd.PersistentFlags().String("age-recipient", "", "Age X25519 recipient public key (age1...) used to encrypt objects")
+	rootCmd.PersistentFlags().Bool("no-compress", false, "Disable zstd compression (enabled by default)")
 
 	viper.BindPFlag("s3.endpoint", rootCmd.PersistentFlags().Lookup("s3-endpoint"))
 	viper.BindPFlag("s3.access_key", rootCmd.PersistentFlags().Lookup("s3-access-key"))
@@ -47,6 +48,7 @@ func init() {
 	viper.BindPFlag("timezone", rootCmd.PersistentFlags().Lookup("timezone"))
 	viper.BindPFlag("age.encrypt", rootCmd.PersistentFlags().Lookup("encrypt"))
 	viper.BindPFlag("age.recipient", rootCmd.PersistentFlags().Lookup("age-recipient"))
+	viper.BindPFlag("no_compress", rootCmd.PersistentFlags().Lookup("no-compress"))
 
 	viper.BindEnv("s3.endpoint", "S3_ENDPOINT")
 	viper.BindEnv("s3.access_key", "S3_ACCESS_KEY")
@@ -56,11 +58,13 @@ func init() {
 	viper.BindEnv("timezone", "SKLEIN_CONVARCHIVE_TIMEZONE")
 	viper.BindEnv("age.encrypt", "SKLEIN_CONVARCHIVE_ENCRYPT")
 	viper.BindEnv("age.recipient", "AGE_RECIPIENT")
+	viper.BindEnv("no_compress", "SKLEIN_CONVARCHIVE_NO_COMPRESS")
 }
 
 func initConfig() {
 	viper.SetDefault("s3.endpoint", "http://localhost:9000")
 	viper.SetDefault("s3.bucket", "conversations")
+	viper.SetDefault("no_compress", false)
 
 	homeDir, err := os.UserHomeDir()
 	if err == nil {

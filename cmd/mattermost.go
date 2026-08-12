@@ -174,8 +174,10 @@ func runArchive() {
 			printError("failed to connect to object storage: %v", err)
 			os.Exit(1)
 		}
-		if encryptor != nil {
-			uploader = archive.NewEncryptingUploader(uploader, encryptor)
+		uploader, err = archive.NewChainedUploader(uploader, isCompress(), encryptor)
+		if err != nil {
+			printError("failed to build uploader chain: %v", err)
+			os.Exit(1)
 		}
 	}
 
@@ -313,6 +315,9 @@ func runArchive() {
 				printError("%v", err)
 				os.Exit(1)
 			}
+			if isCompress() {
+				objKey += ".zst"
+			}
 			if encryptor != nil {
 				objKey += ".age"
 			}
@@ -328,6 +333,9 @@ func runArchive() {
 			if err != nil {
 				printError("%v", err)
 				os.Exit(1)
+			}
+			if isCompress() {
+				objKey += ".zst"
 			}
 			if encryptor != nil {
 				objKey += ".age"
@@ -875,6 +883,12 @@ func archiveChannel(
 
 func isDryRun() bool {
 	return viper.GetBool("dry-run")
+}
+
+// isCompress reports whether objects are compressed with zstd before upload.
+// Compression is enabled by default and disabled with --no-compress.
+func isCompress() bool {
+	return !viper.GetBool("no_compress")
 }
 
 // getEncryptor returns an Encryptor when encryption is enabled, or nil

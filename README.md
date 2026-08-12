@@ -15,6 +15,7 @@ A centralized archiving system for multi-source conversations (Mattermost, Signa
 - Test that everything works before archiving: check your Mattermost access and your object storage connection in one command
 - Safe by design: nothing is uploaded until you say so (dry-run mode), and an interrupted run never uploads partial data
 - Encrypt every object before upload with [age](https://age-encryption.org/) — the object storage never sees plaintext
+- Compress every object with zstd by default (`.zst` suffix) to save storage — disable with `--no-compress`
 
 ## Installation
 
@@ -96,6 +97,7 @@ This project was developed using:
 - Mattermost client: minimal HTTP client built on the Go standard library
 - Object Storage client: [minio-go](https://github.com/minio/minio-go)
 - Encryption: [age](https://age-encryption.org/) (`filippo.io/age`) — client-side encryption of every object before upload
+- Compression: [klauspost/compress](https://github.com/klauspost/compress) (zstd) — every object is compressed before upload
 - Local dev object storage: [RustFS](https://github.com/rustfs/rustfs) via Podman Compose (MinIO community edition was archived in February 2026)
 - Tooling: [mise](https://mise.jdx.dev)
 
@@ -169,7 +171,7 @@ Objects are encrypted client-side with [age](https://age-encryption.org/) before
 
    Encryption can also be enabled in the local config (the `[age]` section of `.sklein-convarchive.toml`, see below).
 
-Encrypted objects keep the same path layout with a `.age` suffix, e.g. `jsonl/mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.age`.
+Objects are compressed with zstd by default (`.zst` suffix) and, with `--encrypt`, age-encrypted with a `.age` suffix, e.g. `jsonl/mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.zst.age`. Compression is disabled with `--no-compress`.
 
 ### Archive Mattermost conversations
 
@@ -209,26 +211,26 @@ The `rustfs` remote is already connected to the object storage through environme
    ```bash
    $ rclone lsd rustfs:                                   # all buckets
    $ rclone lsf -R rustfs:conversations/markdown/         # all markdown objects
-   # markdown/mattermost/team-nimbus/chan-gamma/2026/2026-08.md.age
+   # markdown/mattermost/team-nimbus/chan-gamma/2026/2026-08.md.zst.age
    ```
 
    Team and conversation names are slugified in the object path.
 
-2. Retrieve and decrypt one conversation month:
+2. Retrieve, decompress, and decrypt one conversation month:
 
    ```bash
-   $ rclone copy rustfs:conversations/markdown/mattermost/team-nimbus/chan-gamma/2026/2026-08.md.age .
-   $ age -d -i age.key 2026-08.md.age > 2026-08.md
+   $ rclone copy rustfs:conversations/markdown/mattermost/team-nimbus/chan-gamma/2026/2026-08.md.zst.age .
+   $ age -d -i age.key 2026-08.md.zst.age | zstd -d > 2026-08.md
    ```
 
    Or in a single pipe, without writing the encrypted file to disk:
 
    ```bash
-   $ rclone cat rustfs:conversations/markdown/mattermost/team-nimbus/chan-gamma/2026/2026-08.md.age \
-     | age -d -i age.key > 2026-08.md
+   $ rclone cat rustfs:conversations/markdown/mattermost/team-nimbus/chan-gamma/2026/2026-08.md.zst.age \
+     | age -d -i age.key | zstd -d > 2026-08.md
    ```
 
-   `age.key` is the identity file created in the [encryption section](#encrypt-objects-before-upload-optional). The JSONL layer is read and decrypted the same way, e.g. `rclone cat rustfs:conversations/jsonl/mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.age | age -d -i age.key`.
+   `age.key` is the identity file created in the [encryption section](#encrypt-objects-before-upload-optional). The JSONL layer is read the same way, e.g. `rclone cat rustfs:conversations/jsonl/mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.zst.age | age -d -i age.key | zstd -d`. With `--no-compress`, drop the `zstd -d` step and the `.zst` suffix.
 
 ### Configuration
 
@@ -265,15 +267,15 @@ Source-specific flags (Mattermost: `--server-url`, `--token`, `--username`, `--p
 ```
 conversations/
   jsonl/
-    mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl
+    mattermost/team-nimbus/chan-gamma/2026/2026-08.jsonl.zst
   markdown/
-    mattermost/team-nimbus/chan-gamma/2026/2026-08.md
+    mattermost/team-nimbus/chan-gamma/2026/2026-08.md.zst
 ```
 
 The `jsonl/` layer is the raw, normalized archive (source of truth), one file per conversation per month.
 The `markdown/` layer is a human-readable rendering, generated in parallel, one file per conversation per month, in an IRC-like format (aligned username column, text wrapping at 100 chars, messages grouped by day, threads indented under their root).
 
-With `--encrypt`, every object is age-encrypted and uploaded with a `.age` suffix and `application/octet-stream` content type; the path layout is unchanged.
+Objects are compressed with zstd by default (`.zst` suffix); disable with `--no-compress`. With `--encrypt`, every object is age-encrypted and uploaded with a `.age` suffix and `application/octet-stream` content type, applied after compression (`.zst.age`).
 
 ## Common Schema
 
