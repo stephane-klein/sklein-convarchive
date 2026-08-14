@@ -122,8 +122,14 @@ func runExportArchive(cmd *cobra.Command) {
 
 	var wouldUpload []string
 	var failedFiles []string
+	interrupted := false
 
 	for _, file := range files {
+		if ctx.Err() != nil {
+			interrupted = true
+			break
+		}
+
 		data, readErr := os.ReadFile(file)
 		if readErr != nil {
 			printError("failed to read export file %q: %v", file, readErr)
@@ -197,6 +203,10 @@ func runExportArchive(cmd *cobra.Command) {
 					task.StatusText = "failed"
 				}
 			})
+			if ctx.Err() != nil {
+				interrupted = true
+				return
+			}
 			printError("%v", fileErr)
 			if !fileFailed {
 				fileFailed = true
@@ -206,6 +216,11 @@ func runExportArchive(cmd *cobra.Command) {
 
 		fileUploaded, fileSkipped := 0, 0
 		for i, thread := range threads {
+			if ctx.Err() != nil {
+				interrupted = true
+				break
+			}
+
 			task := threadTasks[i]
 			d.Update(func() {
 				task.Status = ui.StatusRunning
@@ -282,6 +297,11 @@ func runExportArchive(cmd *cobra.Command) {
 			})
 		}
 		d.Update(func() {
+			if interrupted {
+				root.Status = ui.StatusError
+				root.StatusText = "interrupted"
+				return
+			}
 			root.Status = ui.StatusSuccess
 			if isDryRun() {
 				root.StatusText = fmt.Sprintf("Dry run · %d thread(s) would upload, %d skipped", len(threads)-fileSkipped, fileSkipped)
@@ -292,6 +312,12 @@ func runExportArchive(cmd *cobra.Command) {
 	}
 
 	d.Stop()
+
+	if interrupted {
+		fmt.Fprintln(os.Stderr)
+		fmt.Fprintln(os.Stderr, "Interrupted, import stopped")
+		os.Exit(130)
+	}
 
 	if len(failedFiles) > 0 {
 		fmt.Fprintln(os.Stderr)
