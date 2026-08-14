@@ -304,6 +304,10 @@ A local `.sklein-convarchive.toml` file can also be used (see `.sklein-convarchi
 # (claude-chatgpt-backup-extension-export). Global setting.
 owner = "stephane"
 
+# Timezone used for timestamps in the JSONL/Markdown render and for day/month
+# boundaries (IANA name). Global setting.
+timezone = "Europe/Paris"
+
 [mattermost]
 server_url = "https://chat.example.com"
 token = "..."

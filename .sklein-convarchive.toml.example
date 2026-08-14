@@ -6,6 +6,11 @@
 # the SKLEIN_CONVARCHIVE_OWNER environment variable or the --owner flag.
 owner = "stephane"
 
+# Timezone used for timestamps in the JSONL/Markdown render and for day/month
+# boundaries (IANA name). Global setting, also available as the
+# SKLEIN_CONVARCHIVE_TIMEZONE environment variable or the --timezone flag.
+timezone = "Europe/Paris"
+
 [mattermost]
 server_url = "https://mattermost.example.com"
 # token = ""
