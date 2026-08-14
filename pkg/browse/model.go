@@ -98,6 +98,8 @@ func NewModel(reader *Reader, tree *Tree) Model {
 	keys := DefaultKeyMap()
 
 	delegate := list.NewDefaultDelegate()
+	delegate.ShowDescription = false
+	delegate.SetSpacing(0)
 
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
