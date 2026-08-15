@@ -26,6 +26,8 @@ type KeyMap struct {
 	Filter   key.Binding
 	PageUp   key.Binding
 	PageDown key.Binding
+	PrevFile key.Binding
+	NextFile key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings.
@@ -42,6 +44,8 @@ func DefaultKeyMap() KeyMap {
 		Filter:   key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		PageUp:   key.NewBinding(key.WithKeys("pgup", "b"), key.WithHelp("pgup", "page up")),
 		PageDown: key.NewBinding(key.WithKeys("pgdown", "space", "f"), key.WithHelp("pgdn", "page down")),
+		PrevFile: key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "prev file")),
+		NextFile: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next file")),
 	}
 }
 
@@ -62,6 +66,7 @@ type Model struct {
 
 	// reading state
 	curObject *Object
+	curMonth  *Node // month node currently being read (sibling navigation)
 	raw       []byte
 	pretty    bool
 	showRaw   bool
@@ -262,6 +267,16 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.openNode(item.node)
 		}
 
+	case key.Matches(msg, m.keys.NextFile):
+		if m.mode == modeReading {
+			return m, m.stepFile(1)
+		}
+
+	case key.Matches(msg, m.keys.PrevFile):
+		if m.mode == modeReading {
+			return m, m.stepFile(-1)
+		}
+
 	case key.Matches(msg, m.keys.Toggle):
 		if m.mode == modeReading && m.curObject.Layer == LayerJSONL && m.raw != nil {
 			m.pretty = !m.pretty
@@ -300,6 +315,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m *Model) openNode(n *Node) {
 	if n.Kind == KindMonth {
 		m.curObject = n.Object
+		m.curMonth = n
 		m.mode = modeReading
 		m.loading = true
 		m.err = ""
@@ -314,9 +330,59 @@ func (m *Model) openNode(n *Node) {
 	m.setList(n)
 }
 
+// stepFile moves the reading view delta positions in the current directory's
+// month siblings and loads the target object. It returns nil at the edges.
+func (m *Model) stepFile(delta int) tea.Cmd {
+	if m.curMonth == nil || len(m.path) == 0 {
+		return nil
+	}
+	dir := m.path[len(m.path)-1]
+	idx := -1
+	for i, c := range dir.Children {
+		if c == m.curMonth {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+	next := idx + delta
+	if next < 0 || next >= len(dir.Children) {
+		return nil
+	}
+
+	m.curMonth = dir.Children[next]
+	m.curObject = m.curMonth.Object
+	m.loading = true
+	m.err = ""
+	m.raw = nil
+	m.pretty = false
+	m.showRaw = false
+	m.viewport.GotoTop()
+	m.renderReading()
+	return m.loadCurrent()
+}
+
+// monthPosition returns the 1-based position of the current month within its
+// parent directory and the total number of siblings (0, 0 when unavailable).
+func (m Model) monthPosition() (pos, total int) {
+	if m.curMonth == nil || len(m.path) == 0 {
+		return 0, 0
+	}
+	dir := m.path[len(m.path)-1]
+	for i, c := range dir.Children {
+		if c == m.curMonth {
+			return i + 1, len(dir.Children)
+		}
+	}
+	return 0, len(dir.Children)
+}
+
 func (m *Model) backToList() {
 	m.mode = modeList
 	m.curObject = nil
+	m.curMonth = nil
 	m.raw = nil
 	m.loading = false
 	m.err = ""
@@ -376,6 +442,9 @@ func (m Model) View() string {
 			return "Error: " + m.err + "\n\n" + helpFooter(m.keys)
 		}
 		title := m.curObject.Layer + " / " + m.curObject.Month
+		if pos, total := m.monthPosition(); total > 0 {
+			title += fmt.Sprintf(" (%d/%d)", pos, total)
+		}
 		if m.curObject.Layer == LayerJSONL {
 			view := "compact"
 			if m.pretty {
@@ -398,6 +467,6 @@ func (m Model) View() string {
 func helpFooter(keys KeyMap) string {
 	return helpStyle.Render(
 		"enter/→ open · esc/← back · ↑/↓ navigate · / filter · q quit" +
-			" · r JSON view · R raw · g refresh",
+			" · r JSON view · R raw · p/n prev/next file · g refresh",
 	)
 }
